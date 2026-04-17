@@ -63,8 +63,9 @@ services:
       - key: GOOGLE_REDIRECT_URI
         sync: false
 
-  - type: static
+  - type: web
     name: sendflow-web
+    runtime: static
     rootDir: sendflow-pro-main
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
