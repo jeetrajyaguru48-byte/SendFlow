@@ -2,7 +2,7 @@ services:
   - type: web
     name: sendflow-api
     runtime: python
-    plan: starter
+    plan: free
     rootDir: .
     buildCommand: pip install -r requirements.txt
     startCommand: cd backend && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
@@ -33,7 +33,7 @@ services:
   - type: web
     name: sendflow-web
     runtime: static
-    plan: starter
+    plan: free
     rootDir: sendflow-pro-main
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
