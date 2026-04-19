@@ -8,7 +8,7 @@ SendFlow is a Gmail outreach app with:
 - lead import and mapping
 - inbox and reply tracking
 - analytics
-- GitHub Actions scheduled campaign processing
+- scheduled campaign processing via external cron
 
 ## Local Run
 
@@ -42,20 +42,25 @@ Important variables:
 
 Recommended:
 
-- Backend + frontend + Postgres on Render
-- GitHub Actions cron for scheduled sending
+- Frontend on Vercel
+- Backend on Vercel
+- Postgres on Neon
+- cron-job.org for scheduled sending
 
 Deployment guide:
 
 - [DEPLOYMENT.md](/Users/j3et/Downloads/CODE/Email%20Automation/DEPLOYMENT.md:1)
+- [VERCEL_NEON_DEPLOYMENT.md](/Users/j3et/Downloads/CODE/Email%20Automation/VERCEL_NEON_DEPLOYMENT.md:1)
 
 ## Production Files Added
 
 - [render.yaml](/Users/j3et/Downloads/CODE/Email%20Automation/render.yaml:1)
 - [vercel.json](/Users/j3et/Downloads/CODE/Email%20Automation/vercel.json:1)
+- [sendflow-pro-main/vercel.json](/Users/j3et/Downloads/CODE/Email%20Automation/sendflow-pro-main/vercel.json:1)
 
 ## Notes
 
 - Dev can use SQLite
 - Production should use Postgres
-- Production uses GitHub Actions instead of a dedicated background worker
+- Production can use external cron like cron-job.org instead of a dedicated background worker
+- Vercel deployment uses two projects: repo root for backend, `sendflow-pro-main` for frontend

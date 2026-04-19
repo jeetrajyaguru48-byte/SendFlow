@@ -434,7 +434,7 @@ async def send_campaign(
     campaign = _get_owned_campaign(campaign_id, current_user.id, db)
     _activate_campaign(campaign, db)
     return {
-        "message": "Campaign scheduled for GitHub Actions processing" if campaign.status == "scheduled" else "Campaign activated for scheduler processing",
+        "message": "Campaign scheduled for external scheduler processing" if campaign.status == "scheduled" else "Campaign activated for scheduler processing",
         "job_id": None,
         "status": campaign.status,
         "scheduled_for": campaign.send_start_time,
@@ -471,7 +471,7 @@ async def get_campaign_job_status(
     current_user=Depends(get_current_user),
 ):
     _get_owned_campaign(campaign_id, current_user.id, db)
-    return {"id": job_id, "status": "not_applicable", "message": "Dedicated background jobs are disabled in GitHub Actions mode."}
+    return {"id": job_id, "status": "not_applicable", "message": "Dedicated background jobs are disabled in scheduler mode."}
 
 
 @router.delete("/{campaign_id}/job/{job_id}")
