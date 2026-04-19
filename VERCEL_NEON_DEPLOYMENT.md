@@ -10,7 +10,7 @@ This repo is now set up for a no-card deployment path using:
 ## Repo Layout
 
 - Backend Vercel config: [vercel.json](/Users/j3et/Downloads/CODE/Email%20Automation/vercel.json:1)
-- Backend entrypoint: [api/index.py](/Users/j3et/Downloads/CODE/Email%20Automation/api/index.py:1)
+- Backend entrypoint: [index.py](/Users/j3et/Downloads/CODE/Email%20Automation/index.py:1)
 - Frontend Vercel config: [sendflow-pro-main/vercel.json](/Users/j3et/Downloads/CODE/Email%20Automation/sendflow-pro-main/vercel.json:1)
 - Frontend API base: [sendflow-pro-main/src/api/client.ts](/Users/j3et/Downloads/CODE/Email%20Automation/sendflow-pro-main/src/api/client.ts:1)
 - Scheduler endpoint: [backend/app/routers/internal.py](/Users/j3et/Downloads/CODE/Email%20Automation/backend/app/routers/internal.py:1)
