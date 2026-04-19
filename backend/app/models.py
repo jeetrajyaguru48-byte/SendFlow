@@ -30,8 +30,8 @@ class DailySendLog(Base):
     __tablename__ = "daily_send_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
-    date = Column(DateTime(timezone=True), server_default=func.now())
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    date = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     emails_sent = Column(Integer, default=0)
     emails_queued = Column(Integer, default=0)
 
@@ -41,7 +41,7 @@ class Sequence(Base):
     __tablename__ = "sequences"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
     name = Column(String)
     description = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -55,7 +55,7 @@ class SequenceStep(Base):
     __tablename__ = "sequence_steps"
 
     id = Column(Integer, primary_key=True, index=True)
-    sequence_id = Column(Integer, ForeignKey("sequences.id"))
+    sequence_id = Column(Integer, ForeignKey("sequences.id"), index=True)
     step_number = Column(Integer)
     subject = Column(String)
     body = Column(Text)
@@ -73,8 +73,8 @@ class SequenceEnrollment(Base):
     __tablename__ = "sequence_enrollments"
 
     id = Column(Integer, primary_key=True, index=True)
-    lead_id = Column(Integer, ForeignKey("leads.id"))
-    sequence_id = Column(Integer, ForeignKey("sequences.id"))
+    lead_id = Column(Integer, ForeignKey("leads.id"), index=True)
+    sequence_id = Column(Integer, ForeignKey("sequences.id"), index=True)
     current_step = Column(Integer, default=1)
     enrolled_at = Column(DateTime(timezone=True), server_default=func.now())
     paused_at = Column(DateTime(timezone=True), nullable=True)
@@ -88,12 +88,12 @@ class Campaign(Base):
     __tablename__ = "campaigns"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
     name = Column(String)
     description = Column(Text, nullable=True)
     subject_template = Column(String, nullable=True)
     message_template = Column(Text)
-    status = Column(String, default="draft")  # draft, scheduled, queued, running, completed, paused, failed
+    status = Column(String, default="draft", index=True)  # draft, scheduled, queued, running, completed, paused, failed
     send_schedule = Column(JSON, nullable=True)
     send_start_time = Column(DateTime(timezone=True), nullable=True)  # When to start sending
     timezone = Column(String, default="UTC")
@@ -109,7 +109,7 @@ class Campaign(Base):
     
     # New fields for sequences and A/B testing
     is_sequence = Column(Boolean, default=False)
-    sequence_id = Column(Integer, ForeignKey("sequences.id"), nullable=True)
+    sequence_id = Column(Integer, ForeignKey("sequences.id"), nullable=True, index=True)
     ab_test_config = Column(JSON, nullable=True)  # {"enabled": true, "variants": [...], "sample_size": 50}
 
     user = relationship("User", back_populates="campaigns")
@@ -121,10 +121,10 @@ class Lead(Base):
     __tablename__ = "leads"
 
     id = Column(Integer, primary_key=True, index=True)
-    campaign_id = Column(Integer, ForeignKey("campaigns.id"))
+    campaign_id = Column(Integer, ForeignKey("campaigns.id"), index=True)
     email = Column(String, index=True)
     name = Column(String)
-    status = Column(String, default="pending")  # pending, sent, read, clicked, bounced, replied, opted_out
+    status = Column(String, default="pending", index=True)  # pending, sent, read, clicked, bounced, replied, opted_out
     company = Column(String, nullable=True)
     title = Column(String, nullable=True)
     phone = Column(String, nullable=True)
@@ -160,16 +160,16 @@ class EmailLog(Base):
     __tablename__ = "email_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
-    campaign_id = Column(Integer, ForeignKey("campaigns.id"))
-    lead_id = Column(Integer, ForeignKey("leads.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    campaign_id = Column(Integer, ForeignKey("campaigns.id"), index=True)
+    lead_id = Column(Integer, ForeignKey("leads.id"), index=True)
     tracking_id = Column(String, unique=True, index=True)
     message_id = Column(String, nullable=True)
     thread_id = Column(String, nullable=True, index=True)
     subject = Column(String)
     body = Column(Text)
-    status = Column(String)  # sent, delivered, read, clicked, bounced, replied
-    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    status = Column(String, index=True)  # sent, delivered, read, clicked, bounced, replied
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     error_message = Column(Text, nullable=True)
     
     # New fields for A/B testing and sequences

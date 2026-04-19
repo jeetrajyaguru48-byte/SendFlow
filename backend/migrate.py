@@ -53,6 +53,41 @@ def migrate_database():
         },
     }
 
+    indexes_to_create = {
+        "daily_send_logs": [
+            ("ix_daily_send_logs_user_id", ["user_id"]),
+            ("ix_daily_send_logs_date", ["date"]),
+        ],
+        "sequences": [
+            ("ix_sequences_user_id", ["user_id"]),
+        ],
+        "sequence_steps": [
+            ("ix_sequence_steps_sequence_id", ["sequence_id"]),
+        ],
+        "sequence_enrollments": [
+            ("ix_sequence_enrollments_lead_id", ["lead_id"]),
+            ("ix_sequence_enrollments_sequence_id", ["sequence_id"]),
+        ],
+        "campaigns": [
+            ("ix_campaigns_user_id", ["user_id"]),
+            ("ix_campaigns_status", ["status"]),
+            ("ix_campaigns_sequence_id", ["sequence_id"]),
+        ],
+        "leads": [
+            ("ix_leads_campaign_id", ["campaign_id"]),
+            ("ix_leads_status", ["status"]),
+            ("ix_leads_campaign_status", ["campaign_id", "status"]),
+        ],
+        "email_logs": [
+            ("ix_email_logs_user_id", ["user_id"]),
+            ("ix_email_logs_campaign_id", ["campaign_id"]),
+            ("ix_email_logs_lead_id", ["lead_id"]),
+            ("ix_email_logs_status", ["status"]),
+            ("ix_email_logs_timestamp", ["timestamp"]),
+            ("ix_email_logs_lead_timestamp", ["lead_id", "timestamp"]),
+        ],
+    }
+
     with engine.connect() as conn:
         for table_name, columns in tables_to_columns.items():
             existing_columns = [col['name'] for col in inspector.get_columns(table_name)] if inspector.has_table(table_name) else []
@@ -81,6 +116,14 @@ def migrate_database():
                     print(f"✅ Added column: {table_name}.{col_name}")
                 else:
                     print(f"⏭️  Column already exists: {table_name}.{col_name}")
+
+        for table_name, indexes in indexes_to_create.items():
+            if not inspector.has_table(table_name):
+                continue
+            for index_name, columns in indexes:
+                column_list = ", ".join(columns)
+                conn.execute(text(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({column_list})"))
+                print(f"✅ Ensured index: {index_name}")
         conn.commit()
 
     # Create any new tables defined by models

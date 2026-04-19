@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case
@@ -120,6 +122,49 @@ def calculate_next_send_time(campaign: Campaign, lead: Lead, user_timezone: str 
     else:
         return next_send, "Scheduled"
 
+
+def _get_recent_email_history_by_lead(db: Session, lead_ids: List[int]) -> dict[int, List[dict]]:
+    if not lead_ids:
+        return {}
+
+    ranked_logs = (
+        db.query(
+            EmailLog.lead_id.label("lead_id"),
+            EmailLog.timestamp.label("timestamp"),
+            EmailLog.status.label("status"),
+            EmailLog.subject.label("subject"),
+            EmailLog.error_message.label("error_message"),
+            EmailLog.variant.label("variant"),
+            func.row_number().over(
+                partition_by=EmailLog.lead_id,
+                order_by=EmailLog.timestamp.desc(),
+            ).label("rank"),
+        )
+        .filter(EmailLog.lead_id.in_(lead_ids))
+        .subquery()
+    )
+
+    recent_logs = (
+        db.query(ranked_logs)
+        .filter(ranked_logs.c.rank <= 10)
+        .order_by(ranked_logs.c.lead_id, ranked_logs.c.timestamp.desc())
+        .all()
+    )
+
+    history_by_lead: dict[int, List[dict]] = defaultdict(list)
+    for log in recent_logs:
+        history_by_lead[log.lead_id].append(
+            {
+                "timestamp": log.timestamp,
+                "status": log.status,
+                "subject": log.subject,
+                "error_message": log.error_message,
+                "variant": log.variant,
+            }
+        )
+
+    return history_by_lead
+
 @router.get("/campaign/{campaign_id}/stats", response_model=CampaignStats)
 async def get_campaign_stats(
     campaign_id: int,
@@ -169,6 +214,8 @@ async def get_campaign_leads(
 
     # Get all leads for this campaign
     leads = db.query(Lead).filter(Lead.campaign_id == campaign_id).all()
+    lead_ids = [lead.id for lead in leads]
+    history_by_lead = _get_recent_email_history_by_lead(db, lead_ids)
 
     # Get daily send count for the user
     today = datetime.now(pytz.UTC).date()
@@ -219,20 +266,7 @@ async def get_campaign_leads(
             send_status=send_status,
             last_event_type=last_event_type,
             last_event_at=last_event_at,
-            email_history=[
-                {
-                    "timestamp": log.timestamp,
-                    "status": log.status,
-                    "subject": log.subject,
-                    "error_message": log.error_message,
-                    "variant": log.variant,
-                }
-                for log in db.query(EmailLog)
-                .filter(EmailLog.lead_id == lead.id)
-                .order_by(EmailLog.timestamp.desc())
-                .limit(10)
-                .all()
-            ],
+            email_history=history_by_lead.get(lead.id, []),
         ))
 
     return result

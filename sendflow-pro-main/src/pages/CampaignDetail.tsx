@@ -25,18 +25,24 @@ const CampaignDetail = () => {
   useEffect(() => {
     if (!token || !id) return;
 
+    const campaignId = parseInt(id, 10);
+
     const fetchData = async () => {
       setLoadingCampaign(true);
       setLoadingDetails(true);
       try {
-        const campaignData = await api.getCampaign(token, parseInt(id));
-        setCampaign(campaignData);
-        setError(null);
-
-        const [statsResult, leadsResult] = await Promise.allSettled([
-          api.getCampaignStats(token, parseInt(id)),
-          api.getCampaignLeads(token, parseInt(id)),
+        const [campaignResult, statsResult, leadsResult] = await Promise.allSettled([
+          api.getCampaign(token, campaignId),
+          api.getCampaignStats(token, campaignId),
+          api.getCampaignLeads(token, campaignId),
         ]);
+
+        if (campaignResult.status !== "fulfilled") {
+          throw campaignResult.reason;
+        }
+
+        setCampaign(campaignResult.value);
+        setError(null);
 
         if (statsResult.status === "fulfilled") {
           setStats(statsResult.value);
@@ -66,17 +72,18 @@ const CampaignDetail = () => {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !token || !id) return;
+    const campaignId = parseInt(id, 10);
 
     setUploading(true);
     try {
-      await api.uploadLeads(token, parseInt(id), file);
+      await api.uploadLeads(token, campaignId, file);
       toast({
         title: 'Success',
         description: 'Leads uploaded successfully',
       });
 
       // Reload leads
-      const updatedLeads = await api.getCampaignLeads(token, parseInt(id));
+      const updatedLeads = await api.getCampaignLeads(token, campaignId);
       setLeads(updatedLeads || []);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to upload leads';
@@ -92,17 +99,18 @@ const CampaignDetail = () => {
 
   const handleStartCampaign = async () => {
     if (!token || !id) return;
+    const campaignId = parseInt(id, 10);
 
     setStarting(true);
     try {
-      await api.startCampaign(token, parseInt(id));
+      await api.startCampaign(token, campaignId);
       toast({
         title: 'Campaign started!',
         description: 'Emails will be sent with human-like delays.',
       });
 
       // Reload campaign
-      const updated = await api.getCampaign(token, parseInt(id));
+      const updated = await api.getCampaign(token, campaignId);
       setCampaign(updated);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to start campaign';
@@ -118,10 +126,11 @@ const CampaignDetail = () => {
 
   const handleSendNow = async () => {
     if (!token || !id) return;
+    const campaignId = parseInt(id, 10);
 
     setStarting(true);
     try {
-      await api.sendCampaignNow(token, parseInt(id));
+      await api.sendCampaignNow(token, campaignId);
       toast({
         title: 'Campaign started immediately!',
         description: 'Emails are being sent now regardless of time settings.',
@@ -129,8 +138,8 @@ const CampaignDetail = () => {
 
       // Reload campaign and leads
       const [updated, leadsData] = await Promise.all([
-        api.getCampaign(token, parseInt(id)),
-        api.getCampaignLeads(token, parseInt(id)),
+        api.getCampaign(token, campaignId),
+        api.getCampaignLeads(token, campaignId),
       ]);
       setCampaign(updated);
       setLeads(leadsData || []);
@@ -149,9 +158,10 @@ const CampaignDetail = () => {
   const handleDelete = async () => {
     if (!token || !id) return;
     if (!confirm('Are you sure? This cannot be undone.')) return;
+    const campaignId = parseInt(id, 10);
 
     try {
-      await api.deleteCampaign(token, parseInt(id));
+      await api.deleteCampaign(token, campaignId);
       toast({
         title: 'Campaign deleted',
       });
