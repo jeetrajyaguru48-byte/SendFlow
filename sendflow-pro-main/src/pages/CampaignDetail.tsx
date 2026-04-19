@@ -16,7 +16,8 @@ const CampaignDetail = () => {
   const [campaign, setCampaign] = useState<any>(null);
   const [stats, setStats] = useState<any>(null);
   const [leads, setLeads] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingCampaign, setLoadingCampaign] = useState(true);
+  const [loadingDetails, setLoadingDetails] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -25,22 +26,37 @@ const CampaignDetail = () => {
     if (!token || !id) return;
 
     const fetchData = async () => {
-      setLoading(true);
+      setLoadingCampaign(true);
+      setLoadingDetails(true);
       try {
-        const [campaignData, statsData, leadsData] = await Promise.all([
-          api.getCampaign(token, parseInt(id)),
+        const campaignData = await api.getCampaign(token, parseInt(id));
+        setCampaign(campaignData);
+        setError(null);
+
+        const [statsResult, leadsResult] = await Promise.allSettled([
           api.getCampaignStats(token, parseInt(id)),
           api.getCampaignLeads(token, parseInt(id)),
         ]);
 
-        setCampaign(campaignData);
-        setStats(statsData);
-        setLeads(leadsData || []);
-        setError(null);
+        if (statsResult.status === "fulfilled") {
+          setStats(statsResult.value);
+        } else {
+          setStats(null);
+        }
+
+        if (leadsResult.status === "fulfilled") {
+          setLeads(leadsResult.value || []);
+        } else {
+          setLeads([]);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load campaign');
+        setCampaign(null);
+        setStats(null);
+        setLeads([]);
       } finally {
-        setLoading(false);
+        setLoadingCampaign(false);
+        setLoadingDetails(false);
       }
     };
 
@@ -150,7 +166,7 @@ const CampaignDetail = () => {
     }
   };
 
-  if (loading) {
+  if (loadingCampaign) {
     return (
       <div className="flex items-center justify-center py-12">
         <p className="text-muted-foreground">Loading campaign...</p>
@@ -241,6 +257,14 @@ const CampaignDetail = () => {
           </CardContent>
         </Card>
       </div>
+
+      {loadingDetails && (
+        <Card className="bg-card border-border">
+          <CardContent className="py-4">
+            <p className="text-sm text-muted-foreground">Loading campaign activity and lead details...</p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Next Send Summary */}
       {campaign.status === 'running' && leads.length > 0 && (
