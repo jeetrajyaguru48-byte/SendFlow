@@ -4,6 +4,33 @@ const API_BASE =
   import.meta.env.VITE_API_URL ||
   'http://localhost:8000';
 
+const extractErrorMessage = (error: unknown, fallback: string) => {
+  if (!error || typeof error !== "object") return fallback;
+
+  const detail = (error as { detail?: unknown }).detail;
+  if (typeof detail === "string" && detail.trim()) return detail;
+
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (!item || typeof item !== "object") return "";
+        const loc = Array.isArray((item as { loc?: unknown }).loc)
+          ? (item as { loc?: Array<string | number> }).loc?.join(".")
+          : "";
+        const msg = typeof (item as { msg?: unknown }).msg === "string"
+          ? (item as { msg?: string }).msg
+          : JSON.stringify(item);
+        return loc ? `${loc}: ${msg}` : msg;
+      })
+      .filter(Boolean);
+
+    if (parts.length > 0) return parts.join(" | ");
+  }
+
+  return fallback;
+};
+
 export const api = {
   // Auth
   getLoginUrl: async (loginHint?: string) => {
@@ -11,7 +38,7 @@ export const api = {
     const res = await fetch(`${API_BASE}/auth/login${query}`);
     if (!res.ok) {
       const error = await res.json();
-      throw new Error(error.detail || 'Failed to get login URL');
+      throw new Error(extractErrorMessage(error, 'Failed to get login URL'));
     }
     return res.json();
   },
@@ -35,7 +62,7 @@ export const api = {
     });
     if (!res.ok) {
       const error = await res.json().catch(() => null);
-      throw new Error(error?.detail || "Failed to update account settings");
+      throw new Error(extractErrorMessage(error, "Failed to update account settings"));
     }
     return res.json();
   },
@@ -47,7 +74,7 @@ export const api = {
     });
     if (!res.ok) {
       const error = await res.json().catch(() => null);
-      throw new Error(error?.detail || "Failed to send test email");
+      throw new Error(extractErrorMessage(error, "Failed to send test email"));
     }
     return res.json();
   },
@@ -83,7 +110,7 @@ export const api = {
       if (res.status === 401) throw new Error('Unauthorized - please log in again');
       if (!res.ok) {
         const error = await res.json().catch(() => null);
-        throw new Error(error?.detail || `Failed to create campaign (${res.status})`);
+        throw new Error(extractErrorMessage(error, `Failed to create campaign (${res.status})`));
       }
       return res.json();
     } catch (err) {
@@ -110,7 +137,7 @@ export const api = {
     if (res.status === 401) throw new Error('Unauthorized - please log in again');
     if (!res.ok) {
       const error = await res.json().catch(() => ({ detail: 'Failed to fetch campaign' }));
-      throw new Error(error.detail || `Failed to fetch campaign (${res.status})`);
+      throw new Error(extractErrorMessage(error, `Failed to fetch campaign (${res.status})`));
     }
     return res.json();
   },
@@ -127,7 +154,7 @@ export const api = {
     });
     if (!res.ok) {
       const error = await res.json().catch(() => null);
-      throw new Error(error?.detail || 'Failed to create sequence');
+      throw new Error(extractErrorMessage(error, 'Failed to create sequence'));
     }
     return res.json();
   },
@@ -157,11 +184,14 @@ export const api = {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify(data),
+      body: JSON.stringify({
+        ...data,
+        sequence_id: sequenceId,
+      }),
     });
     if (!res.ok) {
       const error = await res.json().catch(() => null);
-      throw new Error(error?.detail || 'Failed to create sequence step');
+      throw new Error(extractErrorMessage(error, 'Failed to create sequence step'));
     }
     return res.json();
   },
@@ -179,7 +209,7 @@ export const api = {
       if (res.status === 401) throw new Error('Unauthorized - please log in again');
       if (!res.ok) {
         const error = await res.json().catch(() => ({ detail: 'Failed to upload leads' }));
-        throw new Error(error.detail || `Failed to upload leads (${res.status})`);
+        throw new Error(extractErrorMessage(error, `Failed to upload leads (${res.status})`));
       }
       return res.json();
     } catch (err) {
@@ -201,7 +231,7 @@ export const api = {
     });
     if (!res.ok) {
       const error = await res.json().catch(() => null);
-      throw new Error(error?.detail || "Failed to preview import");
+      throw new Error(extractErrorMessage(error, "Failed to preview import"));
     }
     return res.json();
   },
@@ -221,7 +251,7 @@ export const api = {
     });
     if (!res.ok) {
       const error = await res.json().catch(() => null);
-      throw new Error(error?.detail || "Failed to import leads");
+      throw new Error(extractErrorMessage(error, "Failed to import leads"));
     }
     return res.json();
   },
@@ -254,7 +284,7 @@ export const api = {
     });
     if (!res.ok) {
       const error = await res.json().catch(() => null);
-      throw new Error(error?.detail || "Failed to add lead");
+      throw new Error(extractErrorMessage(error, "Failed to add lead"));
     }
     return res.json();
   },
@@ -274,7 +304,7 @@ export const api = {
     });
     if (!res.ok) {
       const error = await res.json().catch(() => null);
-      throw new Error(error?.detail || "Failed to assign leads");
+      throw new Error(extractErrorMessage(error, "Failed to assign leads"));
     }
     return res.json();
   },
@@ -290,7 +320,7 @@ export const api = {
     });
     if (!res.ok) {
       const error = await res.json().catch(() => null);
-      throw new Error(error?.detail || "Failed to delete leads");
+      throw new Error(extractErrorMessage(error, "Failed to delete leads"));
     }
     return res.json();
   },
@@ -311,7 +341,7 @@ export const api = {
     });
     if (!res.ok) {
       const error = await res.json().catch(() => null);
-      throw new Error(error?.detail || "Failed to update lead stage");
+      throw new Error(extractErrorMessage(error, "Failed to update lead stage"));
     }
     return res.json();
   },
@@ -325,7 +355,7 @@ export const api = {
       if (res.status === 401) throw new Error('Unauthorized - please log in again');
       if (!res.ok) {
         const error = await res.json().catch(() => ({ detail: 'Failed to start campaign' }));
-        throw new Error(error.detail || `Failed to start campaign (${res.status})`);
+        throw new Error(extractErrorMessage(error, `Failed to start campaign (${res.status})`));
       }
       return res.json();
     } catch (err) {
@@ -348,7 +378,7 @@ export const api = {
       if (res.status === 401) throw new Error('Unauthorized - please log in again');
       if (!res.ok) {
         const error = await res.json().catch(() => ({ detail: 'Failed to start campaign' }));
-        throw new Error(error.detail || `Failed to start campaign (${res.status})`);
+        throw new Error(extractErrorMessage(error, `Failed to start campaign (${res.status})`));
       }
       return res.json();
     } catch (err) {
@@ -368,7 +398,7 @@ export const api = {
       if (res.status === 401) throw new Error('Unauthorized - please log in again');
       if (!res.ok) {
         const error = await res.json().catch(() => ({ detail: 'Failed to delete campaign' }));
-        throw new Error(error.detail || `Failed to delete campaign (${res.status})`);
+        throw new Error(extractErrorMessage(error, `Failed to delete campaign (${res.status})`));
       }
       return res.json();
     } catch (err) {
@@ -426,7 +456,7 @@ export const api = {
     });
     if (!res.ok) {
       const error = await res.json().catch(() => null);
-      throw new Error(error?.detail || "Failed to send reply");
+      throw new Error(extractErrorMessage(error, "Failed to send reply"));
     }
     return res.json();
   },
@@ -438,7 +468,7 @@ export const api = {
     });
     if (!res.ok) {
       const error = await res.json().catch(() => null);
-      throw new Error(error?.detail || "Failed to update lead");
+      throw new Error(extractErrorMessage(error, "Failed to update lead"));
     }
     return res.json();
   },
@@ -450,7 +480,7 @@ export const api = {
     });
     if (!res.ok) {
       const error = await res.json().catch(() => null);
-      throw new Error(error?.detail || "Failed to update lead");
+      throw new Error(extractErrorMessage(error, "Failed to update lead"));
     }
     return res.json();
   },
