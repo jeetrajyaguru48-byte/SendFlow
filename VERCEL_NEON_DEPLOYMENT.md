@@ -22,6 +22,7 @@ This repo is now set up for a no-card deployment path using:
 - Use two separate Vercel projects from the same GitHub repo:
   - one project rooted at the repo root for the backend
   - one project rooted at `sendflow-pro-main` for the frontend
+- Vercel currently builds this backend with Python 3.12, so there is no repo-level Python pin file.
 
 ## 1. Create A Neon Database
 
