@@ -14,6 +14,10 @@ import os
 SUCCESSFUL_STATUSES = {"sent", "delivered", "read", "clicked", "replied", "bounced"}
 
 
+def _sql_datetime_type() -> str:
+    return "TIMESTAMP" if engine.dialect.name == "postgresql" else "DATETIME"
+
+
 def repair_historical_analytics_data():
     """Backfill lead analytics fields from existing email logs in an idempotent way."""
     db = SessionLocal()
@@ -203,7 +207,7 @@ def migrate_database():
                     elif col_type == Boolean:
                         conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {col_name} BOOLEAN DEFAULT 0"))
                     elif col_type == DateTime:
-                        conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {col_name} DATETIME"))
+                        conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {_sql_datetime_type()}"))
                     elif col_type == String:
                         if col_name == 'lifecycle_stage':
                             conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {col_name} VARCHAR DEFAULT 'new'"))

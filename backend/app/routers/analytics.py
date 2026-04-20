@@ -377,14 +377,14 @@ async def get_analytics_overview(
 
     send_heatmap = []
     heatmap_rows = db.query(
-        func.strftime("%H", EmailLog.timestamp).label("hour"),
+        func.extract("hour", EmailLog.timestamp).label("hour"),
         func.count(EmailLog.id)
     ).filter(
         EmailLog.user_id == current_user.id,
         EmailLog.status != "failed",
     ).group_by("hour").all()
     for hour, count in heatmap_rows:
-        send_heatmap.append({"hour": hour, "count": count})
+        send_heatmap.append({"hour": int(hour), "count": count})
 
     return {
         "summary": {
