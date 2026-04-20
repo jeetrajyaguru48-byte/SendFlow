@@ -21,6 +21,7 @@ const CampaignDetail = () => {
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [togglingStatus, setTogglingStatus] = useState(false);
 
   useEffect(() => {
     if (!token || !id) return;
@@ -176,6 +177,62 @@ const CampaignDetail = () => {
     }
   };
 
+  const reloadCampaignData = async (campaignId: number) => {
+    if (!token) return;
+    const [updatedCampaign, updatedStats, updatedLeads] = await Promise.all([
+      api.getCampaign(token, campaignId),
+      api.getCampaignStats(token, campaignId),
+      api.getCampaignLeads(token, campaignId),
+    ]);
+    setCampaign(updatedCampaign);
+    setStats(updatedStats);
+    setLeads(updatedLeads || []);
+  };
+
+  const handlePauseCampaign = async () => {
+    if (!token || !id) return;
+    const campaignId = parseInt(id, 10);
+    setTogglingStatus(true);
+    try {
+      await api.pauseCampaign(token, campaignId);
+      await reloadCampaignData(campaignId);
+      toast({
+        title: "Campaign paused",
+        description: "No new emails will be scheduled until you resume it.",
+      });
+    } catch (err) {
+      toast({
+        title: "Error",
+        description: err instanceof Error ? err.message : "Failed to pause campaign",
+        variant: "destructive",
+      });
+    } finally {
+      setTogglingStatus(false);
+    }
+  };
+
+  const handleResumeCampaign = async () => {
+    if (!token || !id) return;
+    const campaignId = parseInt(id, 10);
+    setTogglingStatus(true);
+    try {
+      await api.resumeCampaign(token, campaignId);
+      await reloadCampaignData(campaignId);
+      toast({
+        title: "Campaign resumed",
+        description: "The scheduler will pick it up again on the next run.",
+      });
+    } catch (err) {
+      toast({
+        title: "Error",
+        description: err instanceof Error ? err.message : "Failed to resume campaign",
+        variant: "destructive",
+      });
+    } finally {
+      setTogglingStatus(false);
+    }
+  };
+
   if (loadingCampaign) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -206,6 +263,8 @@ const CampaignDetail = () => {
 
   const openRate = stats?.sent ? ((stats.read / stats.sent) * 100).toFixed(1) : 0;
   const clickRate = stats?.sent ? ((stats.clicked / stats.sent) * 100).toFixed(1) : 0;
+  const nextCampaignSendAt = campaign.next_send_at || campaign.send_start_time || null;
+  const pendingLeadCount = leads.filter((lead: any) => lead.status === "pending" && !lead.opted_out).length;
 
   return (
     <div className="space-y-6">
@@ -277,70 +336,33 @@ const CampaignDetail = () => {
       )}
 
       {/* Next Send Summary */}
-      {campaign.status === 'running' && leads.length > 0 && (
+      {(campaign.status === 'running' || campaign.status === 'scheduled' || campaign.status === 'paused') && (
         <Card className="bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/30">
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
               <Clock className="h-5 w-5 text-blue-500" />
-              Next Email Sends
+              Next Email
             </CardTitle>
             <CardDescription>
-              When your next emails will be sent based on human-like scheduling
+              Campaign-level schedule and delivery state
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              {(() => {
-                const scheduledLeads = leads.filter((lead: any) => lead.next_send_at && lead.send_status === 'Scheduled');
-                const sendingSoonLeads = leads.filter((lead: any) => lead.send_status === 'Sending soon');
-                const pendingLeads = leads.filter((lead: any) => lead.status === 'pending' && !lead.sent_at);
-
-                return (
-                  <>
-                    {sendingSoonLeads.length > 0 && (
-                      <div className="flex items-center gap-3 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
-                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                        <div>
-                          <p className="font-medium text-green-700">
-                            {sendingSoonLeads.length} email{sendingSoonLeads.length !== 1 ? 's' : ''} sending soon
-                          </p>
-                          <p className="text-sm text-green-600">
-                            Currently being processed with randomized delays
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    {scheduledLeads.length > 0 && (
-                      <div className="flex items-center gap-3 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-                        <Clock className="h-4 w-4 text-blue-500" />
-                        <div>
-                          <p className="font-medium text-blue-700">
-                            {scheduledLeads.length} email{scheduledLeads.length !== 1 ? 's' : ''} scheduled
-                          </p>
-                          <p className="text-sm text-blue-600">
-                            Next: {new Date(Math.min(...scheduledLeads.map((l: any) => new Date(l.next_send_at).getTime()))).toLocaleString()}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    {pendingLeads.length > 0 && (
-                      <div className="flex items-center gap-3 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
-                        <AlertCircle className="h-4 w-4 text-yellow-500" />
-                        <div>
-                          <p className="font-medium text-yellow-700">
-                            {pendingLeads.length} lead{pendingLeads.length !== 1 ? 's' : ''} waiting
-                          </p>
-                          <p className="text-sm text-yellow-600">
-                            Will be scheduled based on campaign settings
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="rounded-lg border border-blue-500/20 bg-blue-500/10 p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-blue-700/70">Next send time</p>
+                <p className="mt-2 text-sm font-semibold text-blue-900">
+                  {nextCampaignSendAt ? new Date(nextCampaignSendAt).toLocaleString() : "Waiting for next scheduler slot"}
+                </p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-white/5 p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Campaign status</p>
+                <p className="mt-2 text-sm font-semibold text-foreground capitalize">{campaign.status}</p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-white/5 p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Pending leads</p>
+                <p className="mt-2 text-sm font-semibold text-foreground">{pendingLeadCount}</p>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -574,11 +596,12 @@ const CampaignDetail = () => {
         {campaign.status === 'running' && (
           <>
             <Button
-              disabled
-              className="bg-amber-600/80 text-white border-0"
+              onClick={handlePauseCampaign}
+              disabled={togglingStatus}
+              className="bg-amber-600 text-white border-0 hover:bg-amber-700"
             >
               <Pause className="h-4 w-4 mr-2" />
-              Campaign Running...
+              {togglingStatus ? 'Pausing...' : 'Pause Campaign'}
             </Button>
             <Button
               onClick={handleSendNow}
@@ -590,6 +613,16 @@ const CampaignDetail = () => {
               {starting ? 'Sending...' : 'Send More Now'}
             </Button>
           </>
+        )}
+        {(campaign.status === 'paused' || campaign.status === 'scheduled') && leads.length > 0 && (
+          <Button
+            onClick={handleResumeCampaign}
+            disabled={togglingStatus}
+            className="gradient-accent text-white border-0 hover:opacity-90"
+          >
+            <Play className="h-4 w-4 mr-2" />
+            {togglingStatus ? 'Resuming...' : 'Resume Campaign'}
+          </Button>
         )}
         {campaign.status === 'draft' && leads.length === 0 && (
           <Button disabled className="opacity-50">

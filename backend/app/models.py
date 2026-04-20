@@ -96,6 +96,7 @@ class Campaign(Base):
     status = Column(String, default="draft", index=True)  # draft, scheduled, queued, running, completed, paused, failed
     send_schedule = Column(JSON, nullable=True)
     send_start_time = Column(DateTime(timezone=True), nullable=True)  # When to start sending
+    next_send_at = Column(DateTime(timezone=True), nullable=True)
     timezone = Column(String, default="UTC")
     hourly_send_rate = Column(Integer, default=5)
     min_delay_minutes = Column(Integer, nullable=True)

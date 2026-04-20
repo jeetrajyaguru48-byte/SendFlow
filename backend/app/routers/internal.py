@@ -23,9 +23,17 @@ def verify_scheduler_secret(x_scheduler_secret: str = Header(default="")) -> Non
 async def run_scheduler(x_scheduler_secret: str = Header(default="", alias="X-Scheduler-Secret")):
     verify_scheduler_secret(x_scheduler_secret)
     campaign_results = process_due_campaigns()
-    inbox_results = sync_bounces_and_replies_once()
     return {
         "ok": True,
         "campaigns": campaign_results,
+    }
+
+
+@router.post("/scheduler/inbox-sync")
+async def run_inbox_sync(x_scheduler_secret: str = Header(default="", alias="X-Scheduler-Secret")):
+    verify_scheduler_secret(x_scheduler_secret)
+    inbox_results = sync_bounces_and_replies_once()
+    return {
+        "ok": True,
         "inbox": inbox_results,
     }

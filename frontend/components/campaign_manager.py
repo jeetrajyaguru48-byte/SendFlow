@@ -20,6 +20,7 @@ def campaign_manager_component(api_base_url="http://localhost:8000"):
 def create_campaign_tab(api_base_url):
     """Create new campaign tab."""
     st.subheader("Create New Campaign")
+    st.info("All campaigns send on a fixed schedule: 30 emails per day, evenly spaced, between 3:00 PM and 9:00 PM IST.")
 
     with st.form("campaign_form"):
         campaign_name = st.text_input("Campaign Name")

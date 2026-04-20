@@ -40,9 +40,9 @@ class CampaignCreate(CampaignBase):
     hourly_send_rate: int = 5
     min_delay_minutes: Optional[int] = None
     max_delay_minutes: Optional[int] = None
-    send_window_start: Optional[str] = None
-    send_window_end: Optional[str] = None
-    send_window_weekdays_only: bool = True
+    send_window_start: Optional[str] = "15:00"
+    send_window_end: Optional[str] = "21:00"
+    send_window_weekdays_only: bool = False
 
 class Campaign(CampaignBase):
     id: int
@@ -50,6 +50,7 @@ class Campaign(CampaignBase):
     status: str
     send_schedule: Optional[list]
     send_start_time: Optional[datetime]
+    next_send_at: Optional[datetime]
     timezone: str = "UTC"
     hourly_send_rate: int = 5
     min_delay_minutes: Optional[int] = None

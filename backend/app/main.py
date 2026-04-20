@@ -26,6 +26,8 @@ def recover_orphaned_campaigns() -> None:
                 Lead.opted_out.is_(False)
             ).scalar() or 0
             campaign.status = "scheduled" if pending_leads > 0 else "completed"
+            if campaign.status == "completed":
+                campaign.next_send_at = None
         db.commit()
     finally:
         db.close()

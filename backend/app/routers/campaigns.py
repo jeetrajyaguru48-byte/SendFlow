@@ -72,7 +72,12 @@ def _activate_campaign(campaign: Campaign, db: Session, force_send: bool = False
         raise HTTPException(status_code=400, detail="Campaign is already running")
 
     campaign.status = _build_campaign_status(campaign, force_send=force_send)
+    campaign.next_send_at = datetime.now(pytz.UTC) if force_send else None
     db.commit()
+
+
+def _campaign_next_run_hint(campaign: Campaign):
+    return campaign.next_send_at or campaign.send_start_time
 
 
 def _find_column(headers: List[str], lower_headers: List[str], candidates: List[str]) -> str:
@@ -165,12 +170,12 @@ async def create_campaign(
         message_template=campaign.message_template,
         send_schedule=[entry.dict() for entry in campaign.send_schedule] if campaign.send_schedule else None,
         send_start_time=campaign.send_start_time,
-        timezone=campaign.timezone,
+        timezone=campaign.timezone or current_user.timezone or "UTC",
         hourly_send_rate=campaign.hourly_send_rate,
         min_delay_minutes=campaign.min_delay_minutes,
         max_delay_minutes=campaign.max_delay_minutes,
-        send_window_start=campaign.send_window_start,
-        send_window_end=campaign.send_window_end,
+        send_window_start=campaign.send_window_start or "15:00",
+        send_window_end=campaign.send_window_end or "21:00",
         send_window_weekdays_only=campaign.send_window_weekdays_only,
         is_sequence=campaign.is_sequence,
         sequence_id=campaign.sequence_id,
@@ -438,6 +443,7 @@ async def send_campaign(
         "job_id": None,
         "status": campaign.status,
         "scheduled_for": campaign.send_start_time,
+        "next_send_at": _campaign_next_run_hint(campaign),
     }
 
 
@@ -460,6 +466,54 @@ async def send_campaign_now(
         "sent": result["sent"],
         "failed": result["failed"],
         "remaining": result["remaining"],
+        "next_send_at": result.get("next_send_at"),
+    }
+
+
+@router.post("/{campaign_id}/pause")
+async def pause_campaign(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    campaign = _get_owned_campaign(campaign_id, current_user.id, db)
+    campaign.status = "paused"
+    campaign.next_send_at = None
+    db.commit()
+    db.refresh(campaign)
+    return {
+        "message": "Campaign paused",
+        "status": campaign.status,
+        "next_send_at": campaign.next_send_at,
+    }
+
+
+@router.post("/{campaign_id}/resume")
+async def resume_campaign(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    campaign = _get_owned_campaign(campaign_id, current_user.id, db)
+    if campaign.status == "running":
+        raise HTTPException(status_code=400, detail="Campaign is already running")
+
+    pending_leads_count = db.query(Lead).filter(
+        Lead.campaign_id == campaign.id,
+        Lead.status == "pending",
+        Lead.opted_out.is_(False),
+    ).count()
+    if pending_leads_count == 0:
+        raise HTTPException(status_code=400, detail="Campaign has no pending leads to resume")
+
+    campaign.status = "scheduled"
+    campaign.next_send_at = None
+    db.commit()
+    db.refresh(campaign)
+    return {
+        "message": "Campaign resumed",
+        "status": campaign.status,
+        "next_send_at": _campaign_next_run_hint(campaign),
     }
 
 

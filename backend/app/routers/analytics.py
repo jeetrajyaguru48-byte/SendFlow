@@ -13,6 +13,9 @@ from ..models import Campaign, Lead, EmailLog, DailySendLog
 from ..schemas import CampaignStats, LeadStatus
 
 
+SUCCESSFUL_EMAIL_STATUSES = {"sent", "delivered", "read", "clicked", "replied", "bounced"}
+
+
 def _last_lead_event(lead: Lead):
     events = [
         ("replied", lead.replied_at),
@@ -34,6 +37,18 @@ def ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
     if dt.tzinfo is None:
         return pytz.UTC.localize(dt)
     return dt.astimezone(pytz.UTC)
+
+
+def get_effective_daily_limit(current_user) -> int:
+    return current_user.custom_daily_limit or current_user.daily_limit or 30
+
+
+def get_successful_send_count_for_day(db: Session, user_id: int, day) -> int:
+    return db.query(func.count(EmailLog.id)).filter(
+        EmailLog.user_id == user_id,
+        func.date(EmailLog.timestamp) == day,
+        EmailLog.status != "failed",
+    ).scalar() or 0
 
 def calculate_next_send_time(campaign: Campaign, lead: Lead, user_timezone: str = "UTC", daily_sends: int = 0, daily_limit: int = 30) -> Tuple[Optional[datetime], str]:
     """
@@ -180,21 +195,15 @@ async def get_campaign_stats(
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
-    # Get lead counts by status
-    status_counts = db.query(
-        Lead.status,
-        func.count(Lead.id)
-    ).filter(Lead.campaign_id == campaign_id).group_by(Lead.status).all()
-
-    stats = {status: count for status, count in status_counts}
+    leads = db.query(Lead).filter(Lead.campaign_id == campaign_id).all()
 
     return CampaignStats(
-        total_leads=sum(stats.values()),
-        sent=stats.get('sent', 0),
-        read=stats.get('read', 0),
-        clicked=stats.get('clicked', 0),
-        bounced=stats.get('bounced', 0),
-        replied=stats.get('replied', 0)
+        total_leads=len(leads),
+        sent=sum(1 for lead in leads if lead.sent_at is not None),
+        read=sum(1 for lead in leads if lead.read_at is not None),
+        clicked=sum(1 for lead in leads if lead.clicked_at is not None),
+        bounced=sum(1 for lead in leads if lead.bounced_at is not None),
+        replied=sum(1 for lead in leads if lead.replied_at is not None),
     )
 
 @router.get("/campaign/{campaign_id}/leads", response_model=List[LeadStatus])
@@ -219,10 +228,7 @@ async def get_campaign_leads(
 
     # Get daily send count for the user
     today = datetime.now(pytz.UTC).date()
-    daily_sends_count = db.query(func.count(EmailLog.id)).filter(
-        EmailLog.user_id == current_user.id,
-        func.date(EmailLog.timestamp) == today
-    ).scalar() or 0
+    daily_sends_count = get_successful_send_count_for_day(db, current_user.id, today)
 
     result = []
     for lead in leads:
@@ -231,7 +237,7 @@ async def get_campaign_leads(
             lead, 
             current_user.timezone or "UTC",
             daily_sends_count,
-            current_user.daily_limit or 30
+            get_effective_daily_limit(current_user)
         )
         last_event_type, last_event_at = _last_lead_event(lead)
 
@@ -282,13 +288,7 @@ async def get_dashboard_data(
 
     dashboard_data = []
     for campaign in campaigns:
-        # Get stats for each campaign
-        status_counts = db.query(
-            Lead.status,
-            func.count(Lead.id)
-        ).filter(Lead.campaign_id == campaign.id).group_by(Lead.status).all()
-
-        stats = {status: count for status, count in status_counts}
+        leads = db.query(Lead).filter(Lead.campaign_id == campaign.id).all()
 
         dashboard_data.append({
             "campaign_id": campaign.id,
@@ -296,12 +296,12 @@ async def get_dashboard_data(
             "status": campaign.status,
             "created_at": campaign.created_at,
             "stats": {
-                "total_leads": sum(stats.values()),
-                "sent": stats.get('sent', 0),
-                "read": stats.get('read', 0),
-                "clicked": stats.get('clicked', 0),
-                "bounced": stats.get('bounced', 0),
-                "replied": stats.get('replied', 0)
+                "total_leads": len(leads),
+                "sent": sum(1 for lead in leads if lead.sent_at is not None),
+                "read": sum(1 for lead in leads if lead.read_at is not None),
+                "clicked": sum(1 for lead in leads if lead.clicked_at is not None),
+                "bounced": sum(1 for lead in leads if lead.bounced_at is not None),
+                "replied": sum(1 for lead in leads if lead.replied_at is not None),
             }
         })
 
@@ -314,34 +314,41 @@ async def get_analytics_overview(
     current_user = Depends(get_current_user)
 ):
     campaigns = db.query(Campaign).filter(Campaign.user_id == current_user.id).all()
+    campaign_ids = [campaign.id for campaign in campaigns]
+    leads = db.query(Lead).filter(Lead.campaign_id.in_(campaign_ids)).all() if campaign_ids else []
     logs = db.query(EmailLog).filter(EmailLog.user_id == current_user.id).all()
 
-    total_sent = len([log for log in logs if log.status in {"sent", "delivered", "read", "clicked", "replied"}])
-    total_opened = len([log for log in logs if log.status in {"read", "clicked", "replied"}])
-    total_replied = len([log for log in logs if log.status == "replied"])
+    total_sent = len([log for log in logs if log.status != "failed"])
+    total_opened = len([lead for lead in leads if lead.read_at is not None])
+    total_replied = len([lead for lead in leads if lead.replied_at is not None])
 
     daily_points = {}
     for log in logs:
-        date_key = log.timestamp.date().isoformat() if log.timestamp else None
-        if not date_key:
+        if log.status == "failed" or not log.timestamp:
             continue
-        daily_points.setdefault(date_key, {"date": date_key, "opens": 0, "replies": 0, "clicks": 0})
-        if log.status in {"read", "clicked", "replied"}:
+        date_key = log.timestamp.date().isoformat()
+        daily_points.setdefault(date_key, {"date": date_key, "sends": 0, "opens": 0, "replies": 0, "clicks": 0})
+        daily_points[date_key]["sends"] += 1
+
+    for lead in leads:
+        if lead.read_at:
+            date_key = lead.read_at.date().isoformat()
+            daily_points.setdefault(date_key, {"date": date_key, "sends": 0, "opens": 0, "replies": 0, "clicks": 0})
             daily_points[date_key]["opens"] += 1
-        if log.status == "clicked":
+        if lead.clicked_at:
+            date_key = lead.clicked_at.date().isoformat()
+            daily_points.setdefault(date_key, {"date": date_key, "sends": 0, "opens": 0, "replies": 0, "clicks": 0})
             daily_points[date_key]["clicks"] += 1
-        if log.status == "replied":
+        if lead.replied_at:
+            date_key = lead.replied_at.date().isoformat()
+            daily_points.setdefault(date_key, {"date": date_key, "sends": 0, "opens": 0, "replies": 0, "clicks": 0})
             daily_points[date_key]["replies"] += 1
 
     best_campaigns = []
     for campaign in campaigns:
-        stats = db.query(
-            Lead.status,
-            func.count(Lead.id)
-        ).filter(Lead.campaign_id == campaign.id).group_by(Lead.status).all()
-        mapped = {status: count for status, count in stats}
-        sent = mapped.get("sent", 0) + mapped.get("read", 0) + mapped.get("clicked", 0) + mapped.get("replied", 0)
-        replies = mapped.get("replied", 0)
+        campaign_leads = [lead for lead in leads if lead.campaign_id == campaign.id]
+        sent = sum(1 for lead in campaign_leads if lead.sent_at is not None)
+        replies = sum(1 for lead in campaign_leads if lead.replied_at is not None)
         best_campaigns.append({
             "campaign_id": campaign.id,
             "campaign_name": campaign.name,
@@ -373,7 +380,8 @@ async def get_analytics_overview(
         func.strftime("%H", EmailLog.timestamp).label("hour"),
         func.count(EmailLog.id)
     ).filter(
-        EmailLog.user_id == current_user.id
+        EmailLog.user_id == current_user.id,
+        EmailLog.status != "failed",
     ).group_by("hour").all()
     for hour, count in heatmap_rows:
         send_heatmap.append({"hour": hour, "count": count})
@@ -404,7 +412,7 @@ async def get_account_activity(
         sent = db.query(func.count(EmailLog.id)).filter(
             EmailLog.user_id == current_user.id,
             func.date(EmailLog.timestamp) == day,
-            EmailLog.status.in_(["sent", "delivered", "read", "clicked", "replied"]),
+            EmailLog.status != "failed",
         ).scalar() or 0
         replies = db.query(func.count(EmailLog.id)).filter(
             EmailLog.user_id == current_user.id,

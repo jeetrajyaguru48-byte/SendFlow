@@ -6,7 +6,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -67,13 +66,6 @@ const CreateCampaign = () => {
     name: "",
     description: "",
     subject_template: "",
-    timezone: "UTC",
-    hourly_send_rate: 5,
-    min_delay_minutes: 2,
-    max_delay_minutes: 7,
-    send_window_start: "09:00",
-    send_window_end: "17:00",
-    send_window_weekdays_only: true,
     send_start_time: "",
   });
 
@@ -148,9 +140,9 @@ const CreateCampaign = () => {
           await api.createSequenceStep(token, sequenceId, {
             ...sequenceStep,
             priority: "normal",
-            weekdays_only: formData.send_window_weekdays_only,
-            send_window_start: formData.send_window_start,
-            send_window_end: formData.send_window_end,
+            weekdays_only: false,
+            send_window_start: "15:00",
+            send_window_end: "21:00",
           });
         }
       }
@@ -162,13 +154,6 @@ const CreateCampaign = () => {
         message_template: sequenceSteps[0].body,
         is_sequence: sequenceSteps.length > 1,
         sequence_id: sequenceId,
-        hourly_send_rate: formData.hourly_send_rate,
-        timezone: formData.timezone,
-        min_delay_minutes: formData.min_delay_minutes,
-        max_delay_minutes: formData.max_delay_minutes,
-        send_window_start: formData.send_window_start,
-        send_window_end: formData.send_window_end,
-        send_window_weekdays_only: formData.send_window_weekdays_only,
         send_start_time: formData.send_start_time || undefined,
       });
 
@@ -366,51 +351,22 @@ const CreateCampaign = () => {
             <Card className="bg-card border-border">
               <CardHeader>
                 <CardTitle>Step 4: Schedule & Launch Settings</CardTitle>
-                <CardDescription>Control hourly send rate, delays, timezone, and launch timing.</CardDescription>
+                <CardDescription>Review the fixed sending policy and choose when the campaign should start.</CardDescription>
               </CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Hourly Send Rate</Label>
-                  <Input type="number" min="1" value={formData.hourly_send_rate} onChange={(e) => setFormData({ ...formData, hourly_send_rate: Number(e.target.value) || 1 })} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Timezone</Label>
-                  <select
-                    value={formData.timezone}
-                    onChange={(e) => setFormData({ ...formData, timezone: e.target.value })}
-                    className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground"
-                  >
-                    {["UTC", "Asia/Kolkata", "America/New_York", "Europe/London", "America/Los_Angeles"].map((timezone) => (
-                      <option key={timezone} value={timezone}>{timezone}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Min Delay Between Emails (minutes)</Label>
-                  <Input type="number" min="0" value={formData.min_delay_minutes} onChange={(e) => setFormData({ ...formData, min_delay_minutes: Number(e.target.value) || 0 })} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Max Delay Between Emails (minutes)</Label>
-                  <Input type="number" min="0" value={formData.max_delay_minutes} onChange={(e) => setFormData({ ...formData, max_delay_minutes: Number(e.target.value) || 0 })} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Send Window Start</Label>
-                  <Input type="time" value={formData.send_window_start} onChange={(e) => setFormData({ ...formData, send_window_start: e.target.value })} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Send Window End</Label>
-                  <Input type="time" value={formData.send_window_end} onChange={(e) => setFormData({ ...formData, send_window_end: e.target.value })} />
+              <CardContent className="space-y-4">
+                <div className="rounded-2xl border border-border bg-muted/20 p-4">
+                  <p className="font-medium text-foreground">Sending policy</p>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                    All campaigns send on a fixed schedule: 30 emails per day, evenly spaced, between 3:00 PM and 9:00 PM IST.
+                    This slot and limit are locked for every sender to keep delivery behavior consistent.
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label>Scheduled Launch</Label>
                   <Input type="datetime-local" value={formData.send_start_time} onChange={(e) => setFormData({ ...formData, send_start_time: e.target.value })} />
                 </div>
-                <div className="flex items-center gap-3 pt-7">
-                  <Checkbox
-                    checked={formData.send_window_weekdays_only}
-                    onCheckedChange={(checked) => setFormData({ ...formData, send_window_weekdays_only: Boolean(checked) })}
-                  />
-                  <Label>Weekdays only</Label>
+                <div className="rounded-xl border border-border p-4 text-sm text-muted-foreground">
+                  The system automatically spaces sends at roughly one email every 12 minutes during the active window.
                 </div>
               </CardContent>
             </Card>

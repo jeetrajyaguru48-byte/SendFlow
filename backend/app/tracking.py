@@ -1,6 +1,7 @@
 import secrets
 import html
 import re
+from datetime import datetime, timezone
 from fastapi import HTTPException, Response
 from sqlalchemy.orm import Session
 from .models import EmailLog, Lead
@@ -19,15 +20,18 @@ def track_email_open(tracking_id: str):
 
         if email_log:
             # Update email log status
-            email_log.status = "read"
+            if email_log.status == "sent":
+                email_log.status = "read"
 
             # Update lead status
             lead = db.query(Lead).filter(Lead.id == email_log.lead_id).first()
-            if lead and lead.status == "sent":
+            if lead and lead.status in {"sent", "read"}:
+                first_open = lead.read_at is None
                 lead.status = "read"
-                lead.read_at = email_log.timestamp
+                lead.read_at = datetime.now(timezone.utc)
                 lead.lifecycle_stage = "opened"
-                lead.lead_score = (lead.lead_score or 0) + 5
+                if first_open:
+                    lead.lead_score = (lead.lead_score or 0) + 5
 
             db.commit()
 
@@ -51,7 +55,7 @@ def track_link_click(tracking_id: str, redirect_url: str):
             lead = db.query(Lead).filter(Lead.id == email_log.lead_id).first()
             if lead and (lead.status == "sent" or lead.status == "read"):
                 lead.status = "clicked"
-                lead.clicked_at = email_log.timestamp
+                lead.clicked_at = datetime.now(timezone.utc)
                 lead.lead_score = (lead.lead_score or 0) + 10
 
             db.commit()
@@ -109,5 +113,5 @@ def process_message_with_tracking(message: str, tracking_id: str, base_url: str)
         for paragraph in paragraphs
     )
 
-    tracking_pixel = f'<img src="{base_url}/track/pixel/{tracking_id}" width="1" height="1" style="display:none;" />'
+    tracking_pixel = f'<img src="{base_url}/track/pixel/{tracking_id}" width="1" height="1" alt="" style="width:1px;height:1px;opacity:0;border:0;" />'
     return f"{tracked_message}{tracking_pixel}"

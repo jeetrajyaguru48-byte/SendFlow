@@ -2,11 +2,110 @@
 Migration script to update existing database with new columns for advanced email features.
 Run this once to update the schema.
 """
+from collections import defaultdict
+
 from app.database import engine, SessionLocal
-from app.models import User, Base
+from app.models import User, Lead, EmailLog, Base
 from sqlalchemy import inspect, Column, Integer, String, DateTime, Boolean, Text, ForeignKey, JSON, text
 from sqlalchemy.sql import func
 import os
+
+
+SUCCESSFUL_STATUSES = {"sent", "delivered", "read", "clicked", "replied", "bounced"}
+
+
+def repair_historical_analytics_data():
+    """Backfill lead analytics fields from existing email logs in an idempotent way."""
+    db = SessionLocal()
+    try:
+        leads = db.query(Lead).all()
+        if not leads:
+            print("⏭️  No leads found for analytics repair")
+            return
+
+        logs = db.query(EmailLog).order_by(EmailLog.lead_id.asc(), EmailLog.timestamp.asc(), EmailLog.id.asc()).all()
+        logs_by_lead = defaultdict(list)
+        for log in logs:
+            if log.lead_id:
+                logs_by_lead[log.lead_id].append(log)
+
+        repaired = 0
+        for lead in leads:
+            lead_logs = logs_by_lead.get(lead.id, [])
+            if not lead_logs:
+                continue
+
+            successful_logs = [log for log in lead_logs if log.status in SUCCESSFUL_STATUSES]
+            first_success = successful_logs[0].timestamp if successful_logs else None
+            first_open = next((log.timestamp for log in lead_logs if log.status in {"read", "clicked", "replied"}), None)
+            first_click = next((log.timestamp for log in lead_logs if log.status == "clicked"), None)
+            first_reply = next((log.timestamp for log in lead_logs if log.status == "replied"), None)
+            first_bounce = next((log.timestamp for log in lead_logs if log.status == "bounced"), None)
+            last_success = successful_logs[-1].timestamp if successful_logs else None
+
+            changed = False
+
+            if first_success and lead.sent_at != first_success:
+                lead.sent_at = first_success
+                changed = True
+
+            if first_open and lead.read_at != first_open:
+                lead.read_at = first_open
+                changed = True
+
+            if first_click and lead.clicked_at != first_click:
+                lead.clicked_at = first_click
+                changed = True
+
+            if first_reply and lead.replied_at != first_reply:
+                lead.replied_at = first_reply
+                changed = True
+
+            if first_bounce and lead.bounced_at != first_bounce:
+                lead.bounced_at = first_bounce
+                changed = True
+
+            if last_success and lead.last_contacted_at != last_success:
+                lead.last_contacted_at = last_success
+                changed = True
+
+            derived_status = "pending"
+            lifecycle_stage = "new"
+            if lead.opted_out:
+                derived_status = "opted_out"
+                lifecycle_stage = "unsubscribed"
+            elif first_reply:
+                derived_status = "replied"
+                lifecycle_stage = "replied"
+            elif first_bounce:
+                derived_status = "bounced"
+                lifecycle_stage = "unsubscribed"
+            elif first_click:
+                derived_status = "clicked"
+                lifecycle_stage = "contacted"
+            elif first_open:
+                derived_status = "read"
+                lifecycle_stage = "opened"
+            elif first_success:
+                derived_status = "sent"
+                lifecycle_stage = "contacted"
+
+            if lead.status != derived_status:
+                lead.status = derived_status
+                changed = True
+
+            if not lead.lifecycle_stage or lead.lifecycle_stage == "new" or changed:
+                if lead.lifecycle_stage != lifecycle_stage:
+                    lead.lifecycle_stage = lifecycle_stage
+                    changed = True
+
+            if changed:
+                repaired += 1
+
+        db.commit()
+        print(f"✅ Repaired historical analytics for {repaired} leads")
+    finally:
+        db.close()
 
 def migrate_database():
     """Update the database schema with missing columns for advanced email features."""
@@ -23,6 +122,7 @@ def migrate_database():
         'campaigns': {
             'description': Text,
             'subject_template': String,
+            'next_send_at': DateTime,
             'timezone': String,
             'hourly_send_rate': Integer,
             'min_delay_minutes': Integer,
@@ -129,6 +229,7 @@ def migrate_database():
     # Create any new tables defined by models
     Base.metadata.create_all(bind=engine)
     print("✅ All new tables created successfully")
+    repair_historical_analytics_data()
 
 if __name__ == "__main__":
     print("Starting database migration...")

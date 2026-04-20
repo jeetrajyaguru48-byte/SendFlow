@@ -389,6 +389,32 @@ export const api = {
     }
   },
 
+  pauseCampaign: async (token: string, campaignId: number) => {
+    const res = await fetch(`${API_BASE}/campaigns/${campaignId}/pause`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status === 401) throw new Error("Unauthorized - please log in again");
+    if (!res.ok) {
+      const error = await res.json().catch(() => null);
+      throw new Error(extractErrorMessage(error, "Failed to pause campaign"));
+    }
+    return res.json();
+  },
+
+  resumeCampaign: async (token: string, campaignId: number) => {
+    const res = await fetch(`${API_BASE}/campaigns/${campaignId}/resume`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status === 401) throw new Error("Unauthorized - please log in again");
+    if (!res.ok) {
+      const error = await res.json().catch(() => null);
+      throw new Error(extractErrorMessage(error, "Failed to resume campaign"));
+    }
+    return res.json();
+  },
+
   deleteCampaign: async (token: string, campaignId: number) => {
     try {
       const res = await fetch(`${API_BASE}/campaigns/${campaignId}`, {

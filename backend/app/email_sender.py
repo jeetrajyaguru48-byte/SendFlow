@@ -19,6 +19,11 @@ from .gmail_service import send_message, check_for_bounces_and_replies
 from .tracking import generate_tracking_id, process_message_with_tracking
 from .config import settings
 
+
+DEFAULT_CAMPAIGN_WINDOW_START = "15:00"
+DEFAULT_CAMPAIGN_WINDOW_END = "21:00"
+
+
 def make_utc_aware(dt: Optional[datetime]) -> Optional[datetime]:
     if dt is None:
         return None
@@ -48,7 +53,7 @@ def get_emails_sent_today(user_id: int, db: Session) -> int:
         EmailLog.user_id == user_id,
         EmailLog.timestamp >= today_start,
         EmailLog.timestamp <= today_end,
-        EmailLog.status.in_(["sent", "delivered"])
+        EmailLog.status != "failed"
     ).scalar()
     
     return sent_count or 0
@@ -116,19 +121,27 @@ def get_pending_emails_for_user(user_id: int, db: Session) -> List[Dict]:
     
     return pending_emails
 
+def get_campaign_timezone(user: User, campaign: Optional[Campaign]) -> pytz.BaseTzInfo:
+    timezone_name = (campaign.timezone if campaign and campaign.timezone else user.timezone) or "UTC"
+    return pytz.timezone(timezone_name)
+
+
+def get_campaign_window(campaign: Optional[Campaign]) -> tuple[int, int, bool]:
+    start_value = campaign.send_window_start if campaign and campaign.send_window_start else DEFAULT_CAMPAIGN_WINDOW_START
+    end_value = campaign.send_window_end if campaign and campaign.send_window_end else DEFAULT_CAMPAIGN_WINDOW_END
+    weekdays_only = campaign.send_window_weekdays_only if campaign and campaign.send_window_start and campaign.send_window_end else False
+    return int(start_value.split(":")[0]), int(end_value.split(":")[0]), weekdays_only
+
+
 def is_optimal_send_time(user: User, lead: Lead, sequence_step: Optional[SequenceStep] = None, campaign: Optional[Campaign] = None) -> bool:
     """Check if current time is optimal for sending to this lead."""
     now = datetime.now(timezone.utc)
-    
-    # Get recipient timezone
-    recipient_tz = pytz.timezone(lead.timezone or user.timezone or "UTC")
-    local_now = now.astimezone(recipient_tz)
-    
-    # Default business hours: 9 AM - 5 PM local time
+
     start_hour = 9
     end_hour = 17
     weekdays_only = True
-    
+    local_now = now.astimezone(pytz.timezone(lead.timezone or user.timezone or "UTC"))
+
     if sequence_step:
         if sequence_step.send_window_start:
             start_hour = int(sequence_step.send_window_start.split(":")[0])
@@ -136,12 +149,9 @@ def is_optimal_send_time(user: User, lead: Lead, sequence_step: Optional[Sequenc
             end_hour = int(sequence_step.send_window_end.split(":")[0])
         weekdays_only = sequence_step.weekdays_only
     elif campaign:
-        if campaign.send_window_start:
-            start_hour = int(campaign.send_window_start.split(":")[0])
-        if campaign.send_window_end:
-            end_hour = int(campaign.send_window_end.split(":")[0])
-        weekdays_only = campaign.send_window_weekdays_only
-    
+        start_hour, end_hour, weekdays_only = get_campaign_window(campaign)
+        local_now = now.astimezone(get_campaign_timezone(user, campaign))
+
     if weekdays_only and local_now.weekday() >= 5:  # Saturday = 5, Sunday = 6
         return False
     
@@ -211,6 +221,19 @@ def get_hourly_spacing_seconds(campaign: Optional[Campaign] = None) -> int:
     if campaign and campaign.hourly_send_rate:
         hourly_rate = max(1, campaign.hourly_send_rate)
     return max(60, int(3600 / hourly_rate))
+
+
+def get_even_campaign_spacing_seconds(user: User, campaign: Campaign) -> int:
+    start_hour, end_hour, _ = get_campaign_window(campaign)
+    window_hours = max(1, end_hour - start_hour)
+    daily_limit = max(1, get_current_daily_limit(user))
+    return max(60, int((window_hours * 3600) / daily_limit))
+
+
+def get_next_campaign_send_time(user: User, campaign: Campaign, now: Optional[datetime] = None) -> datetime:
+    reference_time = make_utc_aware(now) or datetime.now(timezone.utc)
+    spacing_seconds = get_even_campaign_spacing_seconds(user, campaign)
+    return reference_time + timedelta(seconds=spacing_seconds)
 
 
 def get_campaign_sent_last_hour(campaign_id: int, db: Session) -> int:
@@ -402,11 +425,9 @@ def seconds_until_next_send_window(user: User, lead: Lead, campaign: Optional[Ca
             end_hour = int(sequence_step.send_window_end.split(":")[0])
         weekdays_only = sequence_step.weekdays_only
     elif campaign:
-        if campaign.send_window_start:
-            start_hour = int(campaign.send_window_start.split(":")[0])
-        if campaign.send_window_end:
-            end_hour = int(campaign.send_window_end.split(":")[0])
-        weekdays_only = campaign.send_window_weekdays_only
+        recipient_tz = get_campaign_timezone(user, campaign)
+        local_now = now.astimezone(recipient_tz)
+        start_hour, end_hour, weekdays_only = get_campaign_window(campaign)
 
     if local_now.hour < start_hour and (not weekdays_only or local_now.weekday() < 5):
         target = local_now.replace(hour=start_hour, minute=0, second=0, microsecond=0)
@@ -451,6 +472,25 @@ def send_campaign_emails(campaign_id: int, user_id: int, force_send: bool = Fals
                     Lead.opted_out.is_(False),
                 ).scalar() or 0,
                 "reason": "campaign_not_started",
+                "next_send_at": campaign_start.isoformat(),
+            }
+
+        scheduled_next_send = make_utc_aware(campaign.next_send_at)
+        if scheduled_next_send and not force_send and scheduled_next_send > now:
+            campaign.status = "scheduled"
+            db.commit()
+            return {
+                "campaign_id": campaign_id,
+                "status": "scheduled",
+                "sent": 0,
+                "failed": 0,
+                "remaining": db.query(func.count(Lead.id)).filter(
+                    Lead.campaign_id == campaign_id,
+                    Lead.status == "pending",
+                    Lead.opted_out.is_(False),
+                ).scalar() or 0,
+                "reason": "waiting_for_next_send_slot",
+                "next_send_at": scheduled_next_send.isoformat(),
             }
 
         campaign.status = "running"
@@ -476,6 +516,7 @@ def send_campaign_emails(campaign_id: int, user_id: int, force_send: bool = Fals
                     Lead.opted_out.is_(False),
                 ).scalar() or 0,
                 "reason": "daily_limit_reached",
+                "next_send_at": None,
             }
 
         # Get pending emails for this campaign and exclude unsubscribed recipients
@@ -498,14 +539,10 @@ def send_campaign_emails(campaign_id: int, user_id: int, force_send: bool = Fals
                 "reason": "no_pending_leads",
             }
 
-        # Respect hourly batching without requiring a persistent worker.
-        batch_size = max(1, campaign.hourly_send_rate or 5)
         sent_last_hour = 0 if force_send else get_campaign_sent_last_hour(campaign_id, db)
-        hourly_remaining = batch_size if force_send else max(0, batch_size - sent_last_hour)
-        emails_remaining_today = daily_limit - emails_sent_today
-        emails_to_send = min(len(pending_leads), hourly_remaining, emails_remaining_today)
-
-        if emails_to_send <= 0:
+        hourly_limit = max(1, campaign.hourly_send_rate or 5)
+        if not force_send and sent_last_hour >= hourly_limit:
+            campaign.next_send_at = now + timedelta(seconds=get_even_campaign_spacing_seconds(user, campaign))
             campaign.status = "scheduled"
             db.commit()
             return {
@@ -515,21 +552,19 @@ def send_campaign_emails(campaign_id: int, user_id: int, force_send: bool = Fals
                 "failed": 0,
                 "remaining": len(pending_leads),
                 "reason": "hourly_limit_reached",
+                "next_send_at": campaign.next_send_at.isoformat() if campaign.next_send_at else None,
             }
         
         emails_sent_this_batch = 0
         emails_failed_this_batch = 0
 
-        processed_candidates = 0
+        next_window_wait_seconds = None
         for lead in pending_leads:
-            if processed_candidates >= emails_to_send:
-                break
-
             # Skip until the next cron tick if the lead is outside the allowed send window.
             if not force_send and not is_optimal_send_time(user, lead, None, campaign):
+                wait_seconds = seconds_until_next_send_window(user, lead, campaign=campaign)
+                next_window_wait_seconds = wait_seconds if next_window_wait_seconds is None else min(next_window_wait_seconds, wait_seconds)
                 continue
-
-            processed_candidates += 1
 
             # Handle A/B testing
             variant = None
@@ -564,6 +599,25 @@ def send_campaign_emails(campaign_id: int, user_id: int, force_send: bool = Fals
                 db.commit()
             else:
                 emails_failed_this_batch += 1
+
+            break
+
+        if emails_sent_this_batch == 0 and emails_failed_this_batch == 0:
+            if next_window_wait_seconds is not None:
+                campaign.next_send_at = now + timedelta(seconds=next_window_wait_seconds)
+            else:
+                campaign.next_send_at = now + timedelta(seconds=get_even_campaign_spacing_seconds(user, campaign))
+            campaign.status = "scheduled"
+            db.commit()
+            return {
+                "campaign_id": campaign_id,
+                "status": "scheduled",
+                "sent": 0,
+                "failed": 0,
+                "remaining": len(pending_leads),
+                "reason": "outside_send_window",
+                "next_send_at": campaign.next_send_at.isoformat() if campaign.next_send_at else None,
+            }
         
         # Update batch counter
         campaign.emails_sent_in_batch += emails_sent_this_batch
@@ -576,12 +630,15 @@ def send_campaign_emails(campaign_id: int, user_id: int, force_send: bool = Fals
         
         if remaining_pending == 0:
             campaign.status = "completed"
+            campaign.next_send_at = None
             print(f"✅ Campaign {campaign_id} completed! Sent {campaign.emails_sent_in_batch} emails total.")
         elif emails_sent_today + emails_sent_this_batch >= daily_limit:
             campaign.status = "paused"
+            campaign.next_send_at = None
             print(f"⏸️ Campaign {campaign_id} paused after hitting daily limit. Sent {emails_sent_this_batch}, Failed {emails_failed_this_batch}. Remaining: {remaining_pending}")
         else:
             campaign.status = "scheduled"
+            campaign.next_send_at = None if force_send else get_next_campaign_send_time(user, campaign, now=datetime.now(timezone.utc))
             print(f"📋 Campaign {campaign_id} scheduled for the next scheduler run. Sent {emails_sent_this_batch}, Failed {emails_failed_this_batch}. Remaining: {remaining_pending}")
         
         db.commit()
@@ -591,6 +648,7 @@ def send_campaign_emails(campaign_id: int, user_id: int, force_send: bool = Fals
             "sent": emails_sent_this_batch,
             "failed": emails_failed_this_batch,
             "remaining": remaining_pending,
+            "next_send_at": campaign.next_send_at.isoformat() if campaign.next_send_at else None,
         }
 
     except Exception as e:
@@ -641,7 +699,7 @@ def process_due_campaigns() -> Dict[str, object]:
         db.close()
 
 
-def sync_bounces_and_replies_once() -> Dict[str, int]:
+def sync_bounces_and_replies_once(max_logs: int = 25) -> Dict[str, int]:
     """One-pass inbox sync for scheduler usage."""
     db: Session = SessionLocal()
     checked = 0
@@ -651,7 +709,7 @@ def sync_bounces_and_replies_once() -> Dict[str, int]:
         sent_logs = db.query(EmailLog).filter(
             EmailLog.status == "sent",
             EmailLog.timestamp >= seven_days_ago
-        ).all()
+        ).order_by(EmailLog.timestamp.desc()).limit(max_logs).all()
 
         for log in sent_logs:
             try:
@@ -693,7 +751,7 @@ def sync_bounces_and_replies_once() -> Dict[str, int]:
                 print(f"Error checking bounce/reply for log {log.id}: {str(e)}")
                 continue
 
-        return {"checked": checked, "updated": updated}
+        return {"checked": checked, "updated": updated, "scanned": len(sent_logs)}
     finally:
         db.close()
 

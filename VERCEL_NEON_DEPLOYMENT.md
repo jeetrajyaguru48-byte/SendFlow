@@ -107,7 +107,7 @@ If your OAuth consent screen is still in testing mode, add your Gmail account as
 ## 6. Configure cron-job.org
 
 1. Sign in to `https://cron-job.org`.
-2. Create a new cronjob.
+2. Create a cronjob for campaign sends.
 3. Set:
 - URL: `https://your-backend-project.vercel.app/internal/scheduler/run`
 - Request method: `POST`
@@ -120,7 +120,12 @@ X-Scheduler-Secret: your_scheduler_secret
 
 5. Leave the request body empty.
 6. Save the job.
-7. Run a manual test once from cron-job.org.
+7. Create a second cronjob for inbox sync:
+- URL: `https://your-backend-project.vercel.app/internal/scheduler/inbox-sync`
+- Request method: `POST`
+- Execution schedule: every `30` or `60` minutes
+- Header: `X-Scheduler-Secret: your_scheduler_secret`
+8. Run a manual test once from cron-job.org.
 
 ## 7. Verify The Scheduler Endpoint
 

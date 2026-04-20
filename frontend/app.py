@@ -203,21 +203,16 @@ def campaign_manager():
             )
 
             st.markdown("### Timing & Delivery")
-            col1, col2 = st.columns(2)
-            with col1:
-                min_delay = st.number_input("Min Delay (minutes)", min_value=0, max_value=60, value=2)
-                send_window_start = st.text_input("Send Window Start", value="09:00")
-                schedule_enabled = st.checkbox("Schedule campaign start", value=False)
-                if schedule_enabled:
-                    scheduled_date = st.date_input("Scheduled Date", value=date.today())
-                    scheduled_time = st.time_input("Scheduled Time", value=time(9, 0))
-                else:
-                    scheduled_date = None
-                    scheduled_time = None
-            with col2:
-                max_delay = st.number_input("Max Delay (minutes)", min_value=0, max_value=120, value=7)
-                send_window_end = st.text_input("Send Window End", value="17:00")
-                send_window_weekdays_only = st.checkbox("Weekdays only", value=True)
+            st.info(
+                "All campaigns follow a fixed sending policy: 30 emails per day, evenly spaced, between 3:00 PM and 9:00 PM IST."
+            )
+            schedule_enabled = st.checkbox("Schedule campaign start", value=False)
+            if schedule_enabled:
+                scheduled_date = st.date_input("Scheduled Date", value=date.today())
+                scheduled_time = st.time_input("Scheduled Time", value=time(9, 0))
+            else:
+                scheduled_date = None
+                scheduled_time = None
 
             if st.form_submit_button("Create Campaign"):
                 if campaign_name and message_template:
@@ -231,11 +226,6 @@ def campaign_manager():
                         "subject_template": subject_template,
                         "message_template": message_template,
                         "send_start_time": send_start_time,
-                        "min_delay_minutes": int(min_delay),
-                        "max_delay_minutes": int(max_delay),
-                        "send_window_start": send_window_start,
-                        "send_window_end": send_window_end,
-                        "send_window_weekdays_only": send_window_weekdays_only,
                     })
 
                     if response and response.status_code == 200:

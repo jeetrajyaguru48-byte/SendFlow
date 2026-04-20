@@ -9,21 +9,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { api } from "@/api/client";
 import { useToast } from "@/hooks/use-toast";
 
-const timezones = [
-  "UTC",
-  "Asia/Kolkata",
-  "America/New_York",
-  "America/Los_Angeles",
-  "Europe/London",
-  "Europe/Berlin",
-  "Australia/Sydney",
-];
-
 const AccountsPage = () => {
   const { accounts, token, switchAccount, logout, login, isAuthenticated, user } = useAuth();
   const { toast } = useToast();
   const [dailyLimit, setDailyLimit] = useState(30);
-  const [timezone, setTimezone] = useState("UTC");
   const [activity, setActivity] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [sendingTest, setSendingTest] = useState(false);
@@ -31,7 +20,6 @@ const AccountsPage = () => {
   useEffect(() => {
     if (!user) return;
     setDailyLimit(user.daily_limit || 30);
-    setTimezone(user.timezone || "UTC");
   }, [user]);
 
   useEffect(() => {
@@ -66,8 +54,8 @@ const AccountsPage = () => {
     if (!token) return;
     setSaving(true);
     try {
-      await api.updateAccountSettings(token, { daily_limit: dailyLimit, timezone });
-      toast({ title: "Settings updated", description: "Daily limit and timezone were saved." });
+      await api.updateAccountSettings(token, { daily_limit: dailyLimit });
+      toast({ title: "Settings updated", description: "Daily limit was saved." });
     } catch (err) {
       toast({
         title: "Save failed",
@@ -109,7 +97,7 @@ const AccountsPage = () => {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Accounts</h1>
-          <p className="mt-1 text-muted-foreground">Manage sender health, sending limits, timezone, and Google account switching in one place.</p>
+          <p className="mt-1 text-muted-foreground">Monitor sender health, adjust the daily limit, and keep the fixed 3 PM to 9 PM IST send window.</p>
         </div>
         <Button onClick={() => login()} className="gradient-accent text-white border-0 hover:opacity-90">
           <Plus className="mr-2 h-4 w-4" />
@@ -181,28 +169,19 @@ const AccountsPage = () => {
         <Card className="bg-card border-border">
           <CardHeader>
             <CardTitle className="text-base">Account Settings</CardTitle>
-            <CardDescription>Set a custom daily limit and timezone for the active sender account.</CardDescription>
+            <CardDescription>Daily limit is configurable. Campaign send timing stays fixed between 3:00 PM and 9:00 PM IST.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label>Custom Daily Send Limit</Label>
+              <Label>Daily Send Limit</Label>
               <Input type="number" min={1} max={500} value={dailyLimit} onChange={(e) => setDailyLimit(Number(e.target.value || 30))} />
             </div>
-            <div className="space-y-2">
-              <Label>Timezone</Label>
-              <select
-                value={timezone}
-                onChange={(event) => setTimezone(event.target.value)}
-                className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground"
-              >
-                {timezones.map((tz) => (
-                  <option key={tz} value={tz}>{tz}</option>
-                ))}
-              </select>
+            <div className="rounded-xl border border-border p-4 text-sm text-muted-foreground">
+              Campaigns still send evenly during the fixed window of 3:00 PM to 9:00 PM IST. Only the daily cap changes here.
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <Button onClick={handleSave} disabled={saving}>
-                {saving ? "Saving..." : "Save Settings"}
+                {saving ? "Saving..." : "Save Limit"}
               </Button>
               <Button variant="outline" onClick={handleTestSend} disabled={sendingTest}>
                 <SendHorizonal className="mr-2 h-4 w-4" />
@@ -224,7 +203,7 @@ const AccountsPage = () => {
                   {account.user.email}
                 </CardTitle>
                 <CardDescription>
-                  Daily limit: {account.user.daily_limit || 30} emails • Timezone: {account.user.timezone || "UTC"}
+                  Daily limit: {account.user.daily_limit || 30} emails • Window: 3:00 PM - 9:00 PM IST
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex gap-3">

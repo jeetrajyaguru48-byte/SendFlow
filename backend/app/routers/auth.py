@@ -71,7 +71,7 @@ async def get_current_user_info(current_user = Depends(get_current_user), db: Se
     sent_today = db.query(func.count(EmailLog.id)).filter(
         EmailLog.user_id == current_user.id,
         func.date(EmailLog.timestamp) == today,
-        EmailLog.status.in_(["sent", "delivered", "read", "clicked", "replied"])
+        EmailLog.status != "failed"
     ).scalar() or 0
 
     return {
@@ -98,7 +98,7 @@ async def update_account_settings(
     current_user = Depends(get_current_user),
 ):
     if payload.daily_limit is not None:
-        current_user.custom_daily_limit = payload.daily_limit
+        current_user.custom_daily_limit = max(1, payload.daily_limit)
     if payload.timezone:
         current_user.timezone = payload.timezone
     db.commit()
