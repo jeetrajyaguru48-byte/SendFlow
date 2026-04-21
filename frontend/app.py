@@ -1,7 +1,9 @@
 import pandas as pd
 import requests
 import streamlit as st
-from datetime import datetime, date, time
+from datetime import datetime, date, time, timezone
+
+import pytz
 
 # Configuration
 API_BASE_URL = "http://localhost:8000"
@@ -218,7 +220,11 @@ def campaign_manager():
                 if campaign_name and message_template:
                     send_start_time = None
                     if schedule_enabled and scheduled_date and scheduled_time:
-                        send_start_time = datetime.combine(scheduled_date, scheduled_time).isoformat()
+                        account = get_active_account() or {}
+                        tz_name = account.get("timezone") or "Asia/Kolkata"
+                        tz = pytz.timezone(tz_name)
+                        local_dt = tz.localize(datetime.combine(scheduled_date, scheduled_time))
+                        send_start_time = local_dt.astimezone(timezone.utc).isoformat()
 
                     response = api_request("POST", "/campaigns/", {
                         "name": campaign_name,
@@ -226,6 +232,7 @@ def campaign_manager():
                         "subject_template": subject_template,
                         "message_template": message_template,
                         "send_start_time": send_start_time,
+                        "timezone": (get_active_account() or {}).get("timezone") or "Asia/Kolkata",
                     })
 
                     if response and response.status_code == 200:

@@ -6,6 +6,7 @@ __pycache__/
 *.pyo
 *.pyd
 .DS_Store
+.orchids/
 
 sendflow-pro-main/node_modules/
 sendflow-pro-main/dist/

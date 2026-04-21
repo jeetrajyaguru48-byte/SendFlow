@@ -23,6 +23,7 @@ class Settings:
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:8081")
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379")
     CORS_ORIGINS_RAW: str = os.getenv("CORS_ORIGINS", "")
+    DEFAULT_TIMEZONE: str = os.getenv("DEFAULT_TIMEZONE", "Asia/Kolkata")
 
     # Email settings
     MAX_EMAILS_PER_DAY: int = int(os.getenv("MAX_EMAILS_PER_DAY", "30"))
@@ -35,6 +36,7 @@ class Settings:
     
     # Tracking
     BASE_URL: str = os.getenv("BASE_URL", "http://localhost:8000")
+    EMAIL_TRACKING_ENABLED: bool = os.getenv("EMAIL_TRACKING_ENABLED", "true").lower() == "true"
 
     @property
     def CORS_ORIGINS(self):

@@ -18,6 +18,14 @@ from .models import (
 from .gmail_service import send_message, check_for_bounces_and_replies
 from .tracking import generate_tracking_id, process_message_with_tracking
 from .config import settings
+from .url_utils import is_public_https_url
+from .time_utils import (
+    is_within_daily_window,
+    minutes_since_midnight,
+    parse_hhmm,
+    safe_localize,
+    to_utc,
+)
 
 
 DEFAULT_CAMPAIGN_WINDOW_START = "15:00"
@@ -123,42 +131,48 @@ def get_pending_emails_for_user(user_id: int, db: Session) -> List[Dict]:
 
 def get_campaign_timezone(user: User, campaign: Optional[Campaign]) -> pytz.BaseTzInfo:
     timezone_name = (campaign.timezone if campaign and campaign.timezone else user.timezone) or "UTC"
-    return pytz.timezone(timezone_name)
+    try:
+        return pytz.timezone(timezone_name)
+    except Exception:
+        return pytz.UTC
 
 
 def get_campaign_window(campaign: Optional[Campaign]) -> tuple[int, int, bool]:
     start_value = campaign.send_window_start if campaign and campaign.send_window_start else DEFAULT_CAMPAIGN_WINDOW_START
     end_value = campaign.send_window_end if campaign and campaign.send_window_end else DEFAULT_CAMPAIGN_WINDOW_END
-    weekdays_only = campaign.send_window_weekdays_only if campaign and campaign.send_window_start and campaign.send_window_end else False
-    return int(start_value.split(":")[0]), int(end_value.split(":")[0]), weekdays_only
+    start_hour, start_minute = parse_hhmm(start_value, default=DEFAULT_CAMPAIGN_WINDOW_START)
+    end_hour, end_minute = parse_hhmm(end_value, default=DEFAULT_CAMPAIGN_WINDOW_END)
+    start_minutes = start_hour * 60 + start_minute
+    end_minutes = end_hour * 60 + end_minute
+    weekdays_only = bool(campaign.send_window_weekdays_only) if campaign else False
+    return start_minutes, end_minutes, weekdays_only
 
 
 def is_optimal_send_time(user: User, lead: Lead, sequence_step: Optional[SequenceStep] = None, campaign: Optional[Campaign] = None) -> bool:
     """Check if current time is optimal for sending to this lead."""
     now = datetime.now(timezone.utc)
 
-    start_hour = 9
-    end_hour = 17
+    start_minutes = 9 * 60
+    end_minutes = 17 * 60
     weekdays_only = True
     local_now = now.astimezone(pytz.timezone(lead.timezone or user.timezone or "UTC"))
 
     if sequence_step:
         if sequence_step.send_window_start:
-            start_hour = int(sequence_step.send_window_start.split(":")[0])
+            h, m = parse_hhmm(sequence_step.send_window_start, default="09:00")
+            start_minutes = h * 60 + m
         if sequence_step.send_window_end:
-            end_hour = int(sequence_step.send_window_end.split(":")[0])
+            h, m = parse_hhmm(sequence_step.send_window_end, default="17:00")
+            end_minutes = h * 60 + m
         weekdays_only = sequence_step.weekdays_only
     elif campaign:
-        start_hour, end_hour, weekdays_only = get_campaign_window(campaign)
+        start_minutes, end_minutes, weekdays_only = get_campaign_window(campaign)
         local_now = now.astimezone(get_campaign_timezone(user, campaign))
 
     if weekdays_only and local_now.weekday() >= 5:  # Saturday = 5, Sunday = 6
         return False
     
-    if not (start_hour <= local_now.hour < end_hour):
-        return False
-    
-    return True
+    return is_within_daily_window(minutes_since_midnight(local_now), start_minutes, end_minutes)
 
 def parse_spintax(text: str) -> str:
     """Expand simple spintax syntax in a template string."""
@@ -199,6 +213,8 @@ def verify_unsubscribe_token(token: str) -> Optional[int]:
 
 
 def get_unsubscribe_url(lead: Lead) -> str:
+    if not is_public_https_url(settings.BASE_URL):
+        return ""
     token = generate_unsubscribe_token(lead.id)
     return f"{settings.BASE_URL}/unsubscribe/{token}"
 
@@ -224,10 +240,13 @@ def get_hourly_spacing_seconds(campaign: Optional[Campaign] = None) -> int:
 
 
 def get_even_campaign_spacing_seconds(user: User, campaign: Campaign) -> int:
-    start_hour, end_hour, _ = get_campaign_window(campaign)
-    window_hours = max(1, end_hour - start_hour)
+    start_minutes, end_minutes, _ = get_campaign_window(campaign)
+    window_minutes = (end_minutes - start_minutes) % (24 * 60)
+    if window_minutes == 0:
+        window_minutes = 24 * 60
+    window_seconds = max(3600, window_minutes * 60)
     daily_limit = max(1, get_current_daily_limit(user))
-    return max(60, int((window_hours * 3600) / daily_limit))
+    return max(60, int(window_seconds / daily_limit))
 
 
 def get_next_campaign_send_time(user: User, campaign: Campaign, now: Optional[datetime] = None) -> datetime:
@@ -327,12 +346,20 @@ def send_single_email(lead: Lead, campaign: Optional[Campaign], sequence_step: O
         if variant:
             subject = f"[{variant}] {subject}"
 
-        # Append unsubscribe instructions to the body
-        unsubscribe_url = get_unsubscribe_url(lead)
-        body = f"{body}\n\nIf you no longer wish to receive these messages, unsubscribe here: {unsubscribe_url}"
+        base_url_is_safe = is_public_https_url(settings.BASE_URL)
 
-        # Process tracking
-        tracked_body = process_message_with_tracking(body, tracking_id, settings.BASE_URL)
+        # Append unsubscribe instructions (avoid localhost/non-https links in real email).
+        unsubscribe_url = get_unsubscribe_url(lead) if base_url_is_safe else ""
+        if unsubscribe_url:
+            body = f"{body}\n\nIf you no longer wish to receive these messages, unsubscribe here: {unsubscribe_url}"
+        else:
+            body = f"{body}\n\nIf you no longer wish to receive these messages, reply with “unsubscribe”."
+
+        # Process tracking only when we have a public https base URL configured.
+        if settings.EMAIL_TRACKING_ENABLED and base_url_is_safe:
+            tracked_body = process_message_with_tracking(body, tracking_id, settings.BASE_URL)
+        else:
+            tracked_body = body
         
         # Send email
         sent_message = send_message(
@@ -341,7 +368,8 @@ def send_single_email(lead: Lead, campaign: Optional[Campaign], sequence_step: O
             subject=subject,
             body=tracked_body,
             sender_name=sender_name,
-            unsubscribe_link=unsubscribe_url
+            unsubscribe_link=unsubscribe_url or None,
+            unsubscribe_mailto=user.email,
         )
         
         # Log the email
@@ -414,30 +442,43 @@ def seconds_until_next_send_window(user: User, lead: Lead, campaign: Optional[Ca
     recipient_tz = pytz.timezone(lead.timezone or user.timezone or "UTC")
     local_now = now.astimezone(recipient_tz)
 
-    start_hour = 9
-    end_hour = 17
+    start_minutes = 9 * 60
+    end_minutes = 17 * 60
     weekdays_only = True
 
     if sequence_step:
         if sequence_step.send_window_start:
-            start_hour = int(sequence_step.send_window_start.split(":")[0])
+            h, m = parse_hhmm(sequence_step.send_window_start, default="09:00")
+            start_minutes = h * 60 + m
         if sequence_step.send_window_end:
-            end_hour = int(sequence_step.send_window_end.split(":")[0])
+            h, m = parse_hhmm(sequence_step.send_window_end, default="17:00")
+            end_minutes = h * 60 + m
         weekdays_only = sequence_step.weekdays_only
     elif campaign:
         recipient_tz = get_campaign_timezone(user, campaign)
         local_now = now.astimezone(recipient_tz)
-        start_hour, end_hour, weekdays_only = get_campaign_window(campaign)
+        start_minutes, end_minutes, weekdays_only = get_campaign_window(campaign)
 
-    if local_now.hour < start_hour and (not weekdays_only or local_now.weekday() < 5):
-        target = local_now.replace(hour=start_hour, minute=0, second=0, microsecond=0)
+    if weekdays_only and local_now.weekday() >= 5:
+        # Next weekday at window start.
+        target_date = (local_now + timedelta(days=1)).date()
     else:
-        target = local_now + timedelta(days=1)
-        while weekdays_only and target.weekday() >= 5:
-            target += timedelta(days=1)
-        target = target.replace(hour=start_hour, minute=0, second=0, microsecond=0)
+        current_minutes = minutes_since_midnight(local_now)
+        if is_within_daily_window(current_minutes, start_minutes, end_minutes) and (not weekdays_only or local_now.weekday() < 5):
+            return 60
+        if current_minutes < start_minutes:
+            target_date = local_now.date()
+        else:
+            target_date = (local_now + timedelta(days=1)).date()
 
-    target_utc = target.astimezone(timezone.utc)
+    while weekdays_only and datetime(target_date.year, target_date.month, target_date.day).weekday() >= 5:
+        target_date = (datetime(target_date.year, target_date.month, target_date.day) + timedelta(days=1)).date()
+
+    start_hour = start_minutes // 60
+    start_minute = start_minutes % 60
+    target_naive = datetime(target_date.year, target_date.month, target_date.day, start_hour, start_minute, 0, 0)
+    target_local = safe_localize(recipient_tz, target_naive)
+    target_utc = target_local.astimezone(timezone.utc)
     wait_seconds = (target_utc - now).total_seconds()
     return int(max(60, wait_seconds))
 
@@ -453,11 +494,25 @@ def send_campaign_emails(campaign_id: int, user_id: int, force_send: bool = Fals
         if not campaign or not user:
             print(f"❌ Campaign {campaign_id} or User {user_id} not found")
             return
+        if campaign.status == "paused" and not force_send:
+            return {
+                "campaign_id": campaign_id,
+                "status": "paused",
+                "sent": 0,
+                "failed": 0,
+                "remaining": db.query(func.count(Lead.id)).filter(
+                    Lead.campaign_id == campaign_id,
+                    Lead.status == "pending",
+                    Lead.opted_out.is_(False),
+                ).scalar() or 0,
+                "reason": "campaign_paused",
+                "next_send_at": None,
+            }
 
         now = datetime.now(timezone.utc)
 
         # Respect future campaign start times unless explicitly forced.
-        campaign_start = make_utc_aware(campaign.send_start_time)
+        campaign_start = to_utc(campaign.send_start_time, campaign.timezone or user.timezone)
         if campaign_start and not force_send and now < campaign_start:
             campaign.status = "scheduled"
             db.commit()
@@ -475,7 +530,7 @@ def send_campaign_emails(campaign_id: int, user_id: int, force_send: bool = Fals
                 "next_send_at": campaign_start.isoformat(),
             }
 
-        scheduled_next_send = make_utc_aware(campaign.next_send_at)
+        scheduled_next_send = to_utc(campaign.next_send_at, "UTC")
         if scheduled_next_send and not force_send and scheduled_next_send > now:
             campaign.status = "scheduled"
             db.commit()
@@ -667,7 +722,7 @@ def process_due_campaigns() -> Dict[str, object]:
     try:
         now = datetime.now(timezone.utc)
         campaigns = db.query(Campaign).filter(
-            Campaign.status.in_(["scheduled", "queued", "running", "paused"])
+            Campaign.status.in_(["scheduled", "queued", "running"])
         ).all()
 
         results = []
@@ -682,7 +737,7 @@ def process_due_campaigns() -> Dict[str, object]:
                     campaign.status = "completed"
                 continue
 
-            campaign_start = make_utc_aware(campaign.send_start_time)
+            campaign_start = to_utc(campaign.send_start_time, campaign.timezone)
             if campaign_start and campaign_start > now:
                 campaign.status = "scheduled"
                 continue

@@ -2,10 +2,12 @@ import base64
 import html
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.utils import formataddr, formatdate, make_msgid
 from typing import Dict, List, Optional
 import re
 import json
 import os
+import time
 from datetime import datetime
 from .auth import get_gmail_service
 from .models import Campaign, EmailLog, Lead, User
@@ -56,13 +58,53 @@ def _html_to_text(html_content: str) -> str:
     return text.strip()
 
 
-def create_message(sender: str, to: str, subject: str, message_text: str) -> Dict:
+_PROFILE_CACHE: Dict[int, tuple[str, float]] = {}
+_PROFILE_CACHE_TTL_SECONDS = 10 * 60
+
+
+def _get_authenticated_sender_email(service, user_id: int) -> str:
+    now = time.time()
+    cached = _PROFILE_CACHE.get(user_id)
+    if cached and (now - cached[1]) < _PROFILE_CACHE_TTL_SECONDS:
+        return cached[0]
+    profile = service.users().getProfile(userId="me").execute()
+    email_address = (profile.get("emailAddress") or "").strip().lower()
+    _PROFILE_CACHE[user_id] = (email_address, now)
+    return email_address
+
+
+def create_message(
+    sender_email: str,
+    to: str,
+    subject: str,
+    message_text: str,
+    *,
+    sender_name: Optional[str] = None,
+    unsubscribe_link: Optional[str] = None,
+    unsubscribe_mailto: Optional[str] = None,
+) -> Dict:
     """Create a message for an email."""
     message = MIMEMultipart('alternative')
     message['To'] = to
-    message['From'] = sender
+    from_value = formataddr((sender_name, sender_email)) if sender_name else sender_email
+    message['From'] = from_value
     message['Subject'] = _sanitize_subject(subject)
-    message['Reply-To'] = sender
+    message['Reply-To'] = from_value
+    message['Date'] = formatdate(localtime=True)
+    try:
+        sender_domain = sender_email.split("@", 1)[1]
+    except Exception:
+        sender_domain = None
+    message['Message-ID'] = make_msgid(domain=sender_domain)
+    list_unsubscribe_entries: List[str] = []
+    if unsubscribe_mailto:
+        list_unsubscribe_entries.append(f"<mailto:{unsubscribe_mailto}?subject=unsubscribe>")
+    if unsubscribe_link:
+        list_unsubscribe_entries.append(f"<{unsubscribe_link}>")
+    if list_unsubscribe_entries:
+        message["List-Unsubscribe"] = ", ".join(list_unsubscribe_entries)
+        if unsubscribe_link:
+            message["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
 
     sanitized_body = _sanitize_body(message_text)
     if _looks_like_html(sanitized_body):
@@ -123,7 +165,15 @@ def send_message_dev(user: User, to: str, subject: str, body: str, unsubscribe_l
     
     return {"id": message_id, "threadId": message_id}
 
-def send_message(user: User, to: str, subject: str, body: str, unsubscribe_link: Optional[str] = None, sender_name: Optional[str] = None) -> Dict:
+def send_message(
+    user: User,
+    to: str,
+    subject: str,
+    body: str,
+    unsubscribe_link: Optional[str] = None,
+    sender_name: Optional[str] = None,
+    unsubscribe_mailto: Optional[str] = None,
+) -> Dict:
     """Send an email message."""
     # Use dev mode if enabled
     if settings.DEV_MODE:
@@ -131,7 +181,22 @@ def send_message(user: User, to: str, subject: str, body: str, unsubscribe_link:
     
     try:
         service = get_gmail_service(user)
-        message = create_message(user.email, to, subject, body)
+        authenticated_email = _get_authenticated_sender_email(service, user.id)
+        if authenticated_email and authenticated_email.lower() != (user.email or "").strip().lower():
+            raise Exception(
+                f"Connected sender mismatch: expected {user.email}, but Google authenticated {authenticated_email}. "
+                "Reconnect the correct Google account."
+            )
+
+        message = create_message(
+            user.email,
+            to,
+            subject,
+            body,
+            sender_name=sender_name,
+            unsubscribe_link=unsubscribe_link,
+            unsubscribe_mailto=unsubscribe_mailto,
+        )
 
         sent_message = service.users().messages().send(
             userId='me',

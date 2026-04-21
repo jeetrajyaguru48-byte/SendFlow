@@ -111,6 +111,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           throw new Error("No valid saved sessions");
         }
 
+        const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+        if (browserTimezone && browserTimezone !== "UTC") {
+          await Promise.allSettled(
+            results.map(async (account) => {
+              const existingTimezone = account.user?.timezone;
+              if (!existingTimezone || existingTimezone === "UTC") {
+                await api.updateAccountSettings(account.token, { timezone: browserTimezone });
+                account.user = { ...account.user, timezone: browserTimezone };
+              }
+            })
+          );
+        }
+
         setAccounts(results);
         const activeAccount = results.find((account) => account.token === token) || results[0] || null;
         if (activeAccount) {

@@ -105,7 +105,8 @@ def create_or_update_user(db: Session, user_data: UserCreate) -> User:
             google_id=user_data.google_id,
             access_token=user_data.access_token,
             refresh_token=user_data.refresh_token,
-            token_expiry=user_data.token_expiry
+            token_expiry=user_data.token_expiry,
+            timezone=settings.DEFAULT_TIMEZONE,
         )
         db.add(user)
 

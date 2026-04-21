@@ -81,7 +81,7 @@ async def get_current_user_info(current_user = Depends(get_current_user), db: Se
         "daily_limit": current_user.custom_daily_limit or current_user.daily_limit or 30,
         "warmup_stage": current_user.warmup_stage or 0,
         "warmup_start_date": current_user.warmup_start_date,
-        "timezone": current_user.timezone or "UTC",
+        "timezone": current_user.timezone or settings.DEFAULT_TIMEZONE,
         "sent_today": sent_today
     }
 
@@ -116,6 +116,7 @@ async def send_test_email(
             to=current_user.email,
             subject="SendFlow Test Send",
             body="This is a test email from your SendFlow account.",
+            unsubscribe_mailto=current_user.email,
         )
         return {
             "message": "Test email sent successfully",

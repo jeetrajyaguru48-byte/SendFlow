@@ -54,7 +54,8 @@ const parseCsv = async (file: File): Promise<Record<string, string>[]> => {
 const CreateCampaign = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  const browserTimezone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", []);
 
   const [step, setStep] = useState<WizardStep>(1);
   const [loading, setLoading] = useState(false);
@@ -154,7 +155,8 @@ const CreateCampaign = () => {
         message_template: sequenceSteps[0].body,
         is_sequence: sequenceSteps.length > 1,
         sequence_id: sequenceId,
-        send_start_time: formData.send_start_time || undefined,
+        send_start_time: formData.send_start_time ? new Date(formData.send_start_time).toISOString() : undefined,
+        timezone: user?.timezone || browserTimezone,
       });
 
       if (leadRows.length > 0) {

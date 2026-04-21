@@ -12,6 +12,8 @@ from ..auth import get_current_user
 from ..database import get_db
 from ..email_sender import send_campaign_emails
 from ..models import Campaign, EmailLog, Lead
+from ..config import settings
+from ..time_utils import to_utc
 from ..schemas import Campaign as CampaignSchema
 from ..schemas import (
     CampaignCreate,
@@ -163,14 +165,16 @@ async def create_campaign(
     current_user=Depends(get_current_user),
 ):
     """Create a new campaign."""
+    timezone_name = (campaign.timezone or current_user.timezone or settings.DEFAULT_TIMEZONE).strip() or settings.DEFAULT_TIMEZONE
+    normalized_start = to_utc(campaign.send_start_time, timezone_name)
     db_campaign = Campaign(
         name=campaign.name,
         description=campaign.description,
         subject_template=campaign.subject_template,
         message_template=campaign.message_template,
         send_schedule=[entry.dict() for entry in campaign.send_schedule] if campaign.send_schedule else None,
-        send_start_time=campaign.send_start_time,
-        timezone=campaign.timezone or current_user.timezone or "UTC",
+        send_start_time=normalized_start,
+        timezone=timezone_name,
         hourly_send_rate=campaign.hourly_send_rate,
         min_delay_minutes=campaign.min_delay_minutes,
         max_delay_minutes=campaign.max_delay_minutes,
