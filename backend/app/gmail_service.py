@@ -84,18 +84,28 @@ def create_message(
     unsubscribe_mailto: Optional[str] = None,
 ) -> Dict:
     """Create a message for an email."""
-    message = MIMEMultipart('alternative')
-    message['To'] = to
     from_value = formataddr((sender_name, sender_email)) if sender_name else sender_email
-    message['From'] = from_value
-    message['Subject'] = _sanitize_subject(subject)
-    message['Reply-To'] = from_value
-    message['Date'] = formatdate(localtime=True)
+    sanitized_body = _sanitize_body(message_text)
+
+    if settings.EMAIL_PREFER_PLAIN_TEXT:
+        if _looks_like_html(sanitized_body):
+            text_content = _html_to_text(sanitized_body)
+        else:
+            text_content = sanitized_body
+        message = MIMEText(text_content, "plain", "utf-8")
+    else:
+        message = MIMEMultipart("alternative")
+
+    message["To"] = to
+    message["From"] = from_value
+    message["Subject"] = _sanitize_subject(subject)
+    message["Reply-To"] = from_value
+    message["Date"] = formatdate(localtime=True)
     try:
         sender_domain = sender_email.split("@", 1)[1]
     except Exception:
         sender_domain = None
-    message['Message-ID'] = make_msgid(domain=sender_domain)
+    message["Message-ID"] = make_msgid(domain=sender_domain)
     list_unsubscribe_entries: List[str] = []
     if unsubscribe_mailto:
         list_unsubscribe_entries.append(f"<mailto:{unsubscribe_mailto}?subject=unsubscribe>")
@@ -106,27 +116,26 @@ def create_message(
         if unsubscribe_link:
             message["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
 
-    sanitized_body = _sanitize_body(message_text)
-    if _looks_like_html(sanitized_body):
-        inner_html = sanitized_body
-        text_content = _html_to_text(sanitized_body)
-    else:
-        inner_html = _render_plain_text_as_html(sanitized_body)
-        text_content = sanitized_body
+    if not settings.EMAIL_PREFER_PLAIN_TEXT:
+        if _looks_like_html(sanitized_body):
+            inner_html = sanitized_body
+            text_content = _html_to_text(sanitized_body)
+        else:
+            inner_html = _render_plain_text_as_html(sanitized_body)
+            text_content = sanitized_body
 
-    html_content = f"""
-    <html>
-      <body style="margin:0;padding:24px;background-color:#f8fafc;font-family:Arial,sans-serif;">
-        <div style="max-width:680px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:16px;padding:32px;">
-          {inner_html}
-        </div>
-      </body>
-    </html>
-    """
+        html_content = f"""
+        <html>
+          <body style="margin:0;padding:24px;background-color:#f8fafc;font-family:Arial,sans-serif;">
+            <div style="max-width:680px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:16px;padding:32px;">
+              {inner_html}
+            </div>
+          </body>
+        </html>
+        """
 
-    # Attach parts
-    message.attach(MIMEText(text_content, 'plain'))
-    message.attach(MIMEText(html_content, 'html'))
+        message.attach(MIMEText(text_content, "plain", "utf-8"))
+        message.attach(MIMEText(html_content, "html", "utf-8"))
 
     raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
     return {'raw': raw_message}

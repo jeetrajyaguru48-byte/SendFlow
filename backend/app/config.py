@@ -37,6 +37,7 @@ class Settings:
     # Tracking
     BASE_URL: str = os.getenv("BASE_URL", "http://localhost:8000")
     EMAIL_TRACKING_ENABLED: bool = os.getenv("EMAIL_TRACKING_ENABLED", "true").lower() == "true"
+    EMAIL_PREFER_PLAIN_TEXT: bool = os.getenv("EMAIL_PREFER_PLAIN_TEXT", "false").lower() == "true"
 
     @property
     def CORS_ORIGINS(self):
